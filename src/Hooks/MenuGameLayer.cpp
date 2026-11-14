@@ -44,7 +44,7 @@ void ProMenuGameLayer::updateGradient() {
         if (f->m_iconGlow) f->m_iconGlow->setVisible(true);
     }
 
-    player->updateAnimSprite(type, gradient, f);
+    player->updateAnimSprite(type, gradient);
     player->updateVehicleSprite(gradient, f);
     player->updateIconSprite(Utils::getGradient(IconType::Cube, false), f);
     
