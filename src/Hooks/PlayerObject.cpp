@@ -111,9 +111,25 @@ void ProPlayerObject::updateVisibility() {
     if (f->m_vehicleSpriteLineWhitener)
         f->m_vehicleSpriteLineWhitener->setOpacity(m_vehicleSpriteWhitener->getOpacity());
     
-    for (CCSprite* sprite : f->m_animSprites)
-        if (f->m_animSpriteParents.contains(sprite))
-            sprite->setOpacity(f->m_animSpriteParents.at(sprite)->getOpacity());
+    syncAnimSpriteOpacity(f->m_robotAnimSprites, m_robotBatchNode);
+    syncAnimSpriteOpacity(f->m_spiderAnimSprites, m_spiderBatchNode);
+}
+
+void ProPlayerObject::syncAnimSpriteOpacity(std::vector<AnimSprite>& sprites, CCSpriteBatchNode* currentBatch) {
+    for (auto& entry : sprites) {
+        if (!entry.sprite || !entry.parent) continue;
+
+        // Not attached (yet): nothing to sync, and nothing safe to touch.
+        if (entry.sprite->getParent() != entry.parent) continue;
+
+        // A sprite left over from a robot/spider that has since been rebuilt
+        // still points at the old (freed) batch node. Only the pointer value
+        // is compared here, it is never dereferenced.
+        CCSpriteBatchNode* batch = entry.sprite->getBatchNode();
+        if (batch && batch != currentBatch) continue;
+
+        entry.sprite->setOpacity(entry.parent->getOpacity());
+    }
 }
 
 void ProPlayerObject::updateSprite(CCSprite* realSprite, Ref<CCSprite>& sprite, SpriteType type, ColorType color) {
@@ -315,13 +331,63 @@ void ProPlayerObject::updateVehicleSprite(Gradient gradient, auto f) {
 
 }
 
-void ProPlayerObject::updateAnimSprite(IconType type, Gradient gradient, auto f) {
+// Marks a gradient sprite that was cleared before its deferred addChild ran.
+static constexpr int CANCELLED_ANIM_SPRITE_TAG = 0x1C6D;
+
+std::vector<AnimSprite>& ProPlayerObject::getAnimSprites(IconType type) {
+    auto f = m_fields.self();
+
+    return type == IconType::Robot ? f->m_robotAnimSprites : f->m_spiderAnimSprites;
+}
+
+// Must run while the batch node the sprites were added to is still alive:
+// removing a batched sprite writes into its batch node's texture atlas.
+void ProPlayerObject::clearAnimSprites(IconType type) {
+    auto& sprites = getAnimSprites(type);
+
+    for (auto& entry : sprites) {
+        if (!entry.sprite) continue;
+
+        if (entry.sprite->getParent())
+            entry.sprite->removeFromParentAndCleanup(true);
+        else
+            entry.sprite->setTag(CANCELLED_ANIM_SPRITE_TAG); // deferred add still pending
+    }
+
+    sprites.clear();
+}
+
+void ProPlayerObject::updateAnimSprite(IconType type, Gradient gradient) {
     GJRobotSprite* sprite = type == IconType::Robot ? m_robotSprite : m_spiderSprite;
 
     if (!sprite) return;
     if (!sprite->m_paSprite) return;
 
+    // Anything still tracked here was added to the current robot/spider (older
+    // ones are cleared before the game rebuilds it), so this only prevents
+    // stacking duplicates when this runs more than once for the same sprite.
+    clearAnimSprites(type);
+
     Utils::patchBatchNode(type == IconType::Robot ? m_robotBatchNode : m_spiderBatchNode);
+
+    auto& sprites = getAnimSprites(type);
+    bool fineOutline = Loader::get()->isModLoaded("alphalaneous.fine_outline");
+
+    auto attach = [&sprites, fineOutline](CCSprite* child, CCSprite* parent, bool isOutline) {
+        if (isOutline && fineOutline) {
+            Loader::get()->queueInMainThread([child = Ref(child), dad = Ref(parent)] {
+                // Skip if the child was cleared, or the robot/spider was torn
+                // down, before this got to run.
+                if (child->getTag() == CANCELLED_ANIM_SPRITE_TAG) return;
+                if (child->getParent() || !dad->getParent()) return;
+
+                dad->addChild(child, 10);
+            });
+        } else
+            parent->addChild(child);
+
+        sprites.push_back({ child, parent });
+    };
     
     int count = 1;
 
@@ -332,12 +398,9 @@ void ProPlayerObject::updateAnimSprite(IconType type, Gradient gradient, auto f)
         sprite->setID(fmt::format("{}-gradient-{}"_spr, Utils::getTypeID(SpriteType::Animation), count).c_str());
         sprite->setAnchorPoint({0, 0});
 
-        spr->addChild(sprite);
+        attach(sprite, spr, false);
 
         Utils::hideSprite(spr);
-        
-        f->m_animSprites.push_back(sprite);
-        f->m_animSpriteParents[sprite] = spr;
 
         Utils::applyGradient(sprite, gradient.main, type, ColorType::Main, 100 + count, false, m_isSecondPlayer, true, 55);
 
@@ -353,12 +416,9 @@ void ProPlayerObject::updateAnimSprite(IconType type, Gradient gradient, auto f)
         sprite->setID(fmt::format("{}-gradient-{}"_spr, Utils::getTypeID(SpriteType::Animation), count).c_str());
         sprite->setAnchorPoint({0, 0});
 
-        spr->addChild(sprite);
+        attach(sprite, spr, false);
 
         Utils::hideSprite(spr);
-        
-        f->m_animSprites.push_back(sprite);
-        f->m_animSpriteParents[sprite] = spr;
 
         Utils::applyGradient(sprite, gradient.secondary, type, ColorType::Secondary, 200 + count, false, m_isSecondPlayer, true, 55);
 
@@ -374,12 +434,9 @@ void ProPlayerObject::updateAnimSprite(IconType type, Gradient gradient, auto f)
         sprite->setID(fmt::format("{}-gradient-{}"_spr, Utils::getTypeID(SpriteType::Animation), count).c_str());
         sprite->setAnchorPoint({0, 0});
 
-        spr->addChild(sprite);
+        attach(sprite, spr, false);
 
         Utils::hideSprite(spr);
-        
-        f->m_animSprites.push_back(sprite);
-        f->m_animSpriteParents[sprite] = spr;
 
         Utils::applyGradient(sprite, gradient.glow, type, ColorType::Glow, 300 + count, false, m_isSecondPlayer, true, 55);
 
@@ -390,18 +447,10 @@ void ProPlayerObject::updateAnimSprite(IconType type, Gradient gradient, auto f)
         CCSprite* spr = CCSprite::createWithSpriteFrame(sprite->m_extraSprite->displayFrame());
         spr->setID(fmt::format("{}-gradient"_spr, Utils::getTypeID(SpriteType::Animation)).c_str());
         spr->setAnchorPoint({0, 0});
-        
-        if (Loader::get()->isModLoaded("alphalaneous.fine_outline")) {
-            Loader::get()->queueInMainThread([child = Ref(spr), dad = Ref(sprite->m_extraSprite)] {
-                dad->addChild(child, 10);
-            });
-        } else
-            sprite->m_extraSprite->addChild(spr);
+
+        attach(spr, sprite->m_extraSprite, true);
 
         Utils::hideSprite(sprite->m_extraSprite);
-        
-        f->m_animSprites.push_back(spr);
-        f->m_animSpriteParents[sprite] = spr;
 
         Utils::applyGradient(spr, gradient.white, type, ColorType::White, 400, false, m_isSecondPlayer, true, 55);
     }
@@ -414,18 +463,8 @@ void ProPlayerObject::updateAnimSprite(IconType type, Gradient gradient, auto f)
         CCSprite* sprite = CCSprite::createWithSpriteFrame(spr->displayFrame());
         sprite->setID(fmt::format("{}-gradient-line-{}"_spr, Utils::getTypeID(SpriteType::Animation), count).c_str());
         sprite->setAnchorPoint({0, 0});
-        
-        if (Loader::get()->isModLoaded("alphalaneous.fine_outline")) {
-            Loader::get()->queueInMainThread([child = Ref(sprite), dad = Ref(spr)] {
-                dad->addChild(child, 10);
-            });
-        } else
-            spr->addChild(sprite);
 
-        // Utils::hideSprite(spr);
-
-        f->m_animSprites.push_back(sprite);
-        f->m_animSpriteParents[sprite] = spr;
+        attach(sprite, spr, true);
 
         Utils::applyGradient(sprite, gradient.line, type, ColorType::Line, 500 + count, false, m_isSecondPlayer, true, 55, true);
 
@@ -441,17 +480,7 @@ void ProPlayerObject::updateAnimSprite(IconType type, Gradient gradient, auto f)
         sprite->setID(fmt::format("{}-gradient-line-{}"_spr, Utils::getTypeID(SpriteType::Animation), count).c_str());
         sprite->setAnchorPoint({0, 0});
 
-        if (Loader::get()->isModLoaded("alphalaneous.fine_outline")) {
-            Loader::get()->queueInMainThread([child = Ref(sprite), dad = Ref(spr)] {
-                dad->addChild(child, 10);
-            });
-        } else
-            spr->addChild(sprite);
-        
-        // Utils::hideSprite(spr);
-
-        f->m_animSprites.push_back(sprite);
-        f->m_animSpriteParents[sprite] = spr;
+        attach(sprite, spr, true);
 
         Utils::applyGradient(sprite, gradient.line, type, ColorType::Line, 600 + count, false, m_isSecondPlayer, true, 55, true);
 
@@ -462,18 +491,8 @@ void ProPlayerObject::updateAnimSprite(IconType type, Gradient gradient, auto f)
         CCSprite* spr = CCSprite::createWithSpriteFrame(sprite->m_extraSprite->displayFrame());
         spr->setID(fmt::format("{}-gradient-line"_spr, Utils::getTypeID(SpriteType::Animation)).c_str());
         spr->setAnchorPoint({0, 0});
-        
-        if (Loader::get()->isModLoaded("alphalaneous.fine_outline")) {
-            Loader::get()->queueInMainThread([child = Ref(spr), dad = Ref(sprite->m_extraSprite)] {
-                dad->addChild(child, 10);
-            });
-        } else
-            sprite->m_extraSprite->addChild(spr);
 
-        // Utils::hideSprite(sprite->m_extraSprite);
-
-        f->m_animSprites.push_back(spr);
-        f->m_animSpriteParents[sprite] = spr;
+        attach(spr, sprite->m_extraSprite, true);
 
         Utils::applyGradient(spr, gradient.line, type, ColorType::Line, 700, false, m_isSecondPlayer, true, 55, true);
     }
@@ -576,52 +595,43 @@ void ProPlayerObject::updatePlayerJetpackFrame(int p0) {
     updateGradient();
 }
 
-void ProPlayerObject::createRobot(int p0) {
-    PlayerObject::createRobot(p0);
+void ProPlayerObject::refreshAnimSprites(IconType type) {
+    // Ref keeps the player alive until the deferred call below has run.
+    auto updateFn = [self = Ref(this), type] {
+        if (self->getTag() == 0xCb04) return;
 
-    auto updateFn = [this](){
-        if (getTag() == 0xCb04) return;
+        if (self->shouldReturn(GJBaseGameLayer::get())) return;
 
-        if (shouldReturn(GJBaseGameLayer::get())) return;
-
-        updateAnimSprite(
-            IconType::Robot,
-            Utils::getGradient(IconType::Robot, this == m_gameLayer->m_player2),
-            m_fields.self()
+        self->updateAnimSprite(
+            type,
+            Utils::getGradient(type, self.data() == self->m_gameLayer->m_player2)
         );
     };
 
     if (!m_fields->m_animSpritesInitialized)
-        Loader::get()->queueInMainThread([updateFn, this](){
+        Loader::get()->queueInMainThread([updateFn, self = Ref(this)] {
             updateFn();
-            m_fields->m_animSpritesInitialized = true;
+            self->m_fields->m_animSpritesInitialized = true;
         });
     else
         updateFn();
 }
 
+void ProPlayerObject::createRobot(int p0) {
+    // Before the original: it may destroy the batch node these live in.
+    clearAnimSprites(IconType::Robot);
+
+    PlayerObject::createRobot(p0);
+
+    refreshAnimSprites(IconType::Robot);
+}
+
 void ProPlayerObject::createSpider(int p0) {
+    clearAnimSprites(IconType::Spider);
+
     PlayerObject::createSpider(p0);
 
-    auto updateFn = [this](){
-        if (getTag() == 0xCb04) return;
-
-        if (shouldReturn(GJBaseGameLayer::get())) return;
-
-        updateAnimSprite(
-            IconType::Spider,
-            Utils::getGradient(IconType::Spider, this == m_gameLayer->m_player2),
-            m_fields.self()
-        );
-    };
-
-    if (!m_fields->m_animSpritesInitialized)
-        Loader::get()->queueInMainThread([updateFn, this](){
-            updateFn();
-            m_fields->m_animSpritesInitialized = true;
-        });
-    else
-        updateFn();
+    refreshAnimSprites(IconType::Spider);
 }
 
 bool ProPlayerObject::init(int p0, int p1, GJBaseGameLayer* p2, CCLayer* p3, bool p4) {

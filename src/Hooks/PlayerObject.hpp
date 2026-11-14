@@ -4,6 +4,11 @@
 
 #include <Geode/modify/PlayerObject.hpp>
 
+struct AnimSprite {
+	Ref<CCSprite> sprite;
+	Ref<CCSprite> parent;
+};
+
 class $modify(ProPlayerObject, PlayerObject) {
 
 	static void onModify(auto& self) {
@@ -36,8 +41,8 @@ class $modify(ProPlayerObject, PlayerObject) {
 		Ref<CCSprite> m_vehicleSpriteLineSecondary = nullptr;
 		Ref<CCSprite> m_vehicleSpriteLineWhitener = nullptr;
 
-		std::vector<Ref<CCSprite>> m_animSprites;
-		std::unordered_map<CCSprite*, Ref<CCSprite>> m_animSpriteParents;
+		std::vector<AnimSprite> m_robotAnimSprites;
+		std::vector<AnimSprite> m_spiderAnimSprites;
 
 		bool m_thatOneUfoShipAndCubeModIsLoaded = false;
 		bool m_separateDualIconsIsLoaded = false;
@@ -56,13 +61,21 @@ class $modify(ProPlayerObject, PlayerObject) {
 	
 	void updateVisibility();
 
+	void syncAnimSpriteOpacity(std::vector<AnimSprite>&, CCSpriteBatchNode*);
+
+	std::vector<AnimSprite>& getAnimSprites(IconType);
+
+	void clearAnimSprites(IconType);
+
+	void refreshAnimSprites(IconType);
+
 	void updateSprite(CCSprite*, Ref<CCSprite>&, SpriteType, ColorType);
 
 	void updateIconSprite(Gradient, auto);
 
 	void updateVehicleSprite(Gradient, auto);
 
-	void updateAnimSprite(IconType, Gradient, auto);
+	void updateAnimSprite(IconType, Gradient);
 
 	void updateGradient();
 
