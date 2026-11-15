@@ -162,6 +162,42 @@ GradientConfig Utils::getDefaultConfig(ColorType colorType, bool secondPlayer) {
     };
 }
 
+// The progress bar is wide and thin, so its default points sit on its two ends.
+GradientConfig Utils::getDefaultBarConfig() {
+    ccColor3B color = getPlayerColor(ColorType::Main, false);
+
+    return GradientConfig{
+        {
+            {{0.f, 0.5f}, color},
+            {{1.f, 0.5f}, color}
+        },
+        true
+    };
+}
+
+GradientConfig Utils::getSavedBarConfig() {
+    if (!Mod::get()->hasSavedValue("progress-bar"))
+        return getDefaultBarConfig();
+
+    matjson::Value container = Mod::get()->getSavedValue<matjson::Value>("progress-bar");
+
+    if (!container.contains("bar"))
+        return getDefaultBarConfig();
+
+    return configFromObject(container["bar"]);
+}
+
+void Utils::saveBarConfig(GradientConfig config) {
+    saveConfig(config, "progress-bar", "bar");
+}
+
+// rectInPixels, when given, is the texture area the gradient spans. The
+// in-game bar grows by widening its texture rect, so without it the whole
+// gradient would be squeezed into the filled part.
+void Utils::applyBarGradient(CCSprite* sprite, GradientConfig config, bool inGame, const CCRect* rectInPixels) {
+    applyGradient(sprite, config, static_cast<IconType>(-2), ColorType::Main, 800, false, false, inGame, 66, false, rectInPixels);
+}
+
 matjson::Value Utils::getSaveObject(GradientConfig config) {
     matjson::Value ret = matjson::Value{};
     matjson::Value pointsObject = matjson::Value::array();
@@ -625,7 +661,7 @@ CCGLProgram* Utils::createShader(const std::string& key, bool linear, bool blend
     return program;
 }
 
-void Utils::applyGradient(CCSprite* sprite, GradientConfig config, IconType iconType, ColorType colorType, int id, bool blend, bool secondPlayer, bool playerObject, int extra, bool line) {
+void Utils::applyGradient(CCSprite* sprite, GradientConfig config, IconType iconType, ColorType colorType, int id, bool blend, bool secondPlayer, bool playerObject, int extra, bool line, const CCRect* rectOverride) {
     if (!sprite) return;
     
     if (config.isEmpty(colorType, secondPlayer))
@@ -662,10 +698,10 @@ void Utils::applyGradient(CCSprite* sprite, GradientConfig config, IconType icon
     program->setUniformsForBuiltins();
 
     CCSpriteFrame* frame = sprite->displayFrame();
-    CCRect rectInPixels = frame->getRectInPixels();
+    CCRect rectInPixels = rectOverride ? *rectOverride : frame->getRectInPixels();
     CCSize texSize = frame->getTexture()->getContentSizeInPixels();
 
-    bool rot = frame->m_bRotated;
+    bool rot = rectOverride ? false : frame->m_bRotated;
 
     float uMin = rectInPixels.origin.x / texSize.width;
     float vMin = rectInPixels.origin.y / texSize.height;

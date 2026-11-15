@@ -23,6 +23,9 @@ public:
     static GradientConfig configFromObject(const matjson::Value&);
     static GradientConfig getSavedConfig(IconType, ColorType, bool = false);
     static GradientConfig getDefaultConfig(ColorType, bool);
+    static GradientConfig getDefaultBarConfig();
+    static GradientConfig getSavedBarConfig();
+    static void saveBarConfig(GradientConfig);
     static matjson::Value getSaveObject(GradientConfig);
 
     static Gradient getGradient(IconType, bool);
@@ -33,7 +36,8 @@ public:
     
     static void applyGradient(SimplePlayer*, Gradient, bool, bool, int);
     static void applyGradient(SimplePlayer*, GradientConfig, ColorType, bool, bool, int);
-    static void applyGradient(CCSprite*, GradientConfig, IconType, ColorType, int, bool, bool, bool, int, bool = false);
+    static void applyGradient(CCSprite*, GradientConfig, IconType, ColorType, int, bool, bool, bool, int, bool = false, const CCRect* = nullptr);
+    static void applyBarGradient(CCSprite*, GradientConfig, bool, const CCRect* = nullptr);
     
     static CCGLProgram* createShader(const std::string&, bool, bool, bool);
     

@@ -26,6 +26,10 @@ private:
     CCMenuItemSpriteExtra* m_pasteButton = nullptr;
     CCMenuItemSpriteExtra* m_saveButton = nullptr;
     CCMenuItemSpriteExtra* m_loadButton = nullptr;
+    CCMenuItemSpriteExtra* m_nextPageButton = nullptr;
+    CCMenuItemSpriteExtra* m_prevPageButton = nullptr;
+
+    NineSlice* m_sidebarBg = nullptr;
 
     CCMenuItemToggler* m_linearToggle = nullptr;
     CCMenuItemToggler* m_radialToggle = nullptr;
@@ -67,6 +71,7 @@ private:
     bool m_ignoreColorChange = false;
     bool m_pointsHidden = false;
     bool m_smoothScroll = false;
+    bool m_barMode = false;
     
     float m_scroll = 0.f;
 
@@ -88,6 +93,10 @@ private:
     void onPaste(CCObject*);
     void onSave(CCObject*);
     void onLoad(CCObject*);
+    void onPageToggle(CCObject*);
+
+    GradientConfig getEditedConfig();
+    ColorType getEditedColor();
 
     void load(IconType, ColorType, bool = false, bool = false, bool = false);
     void save(GradientConfig, ColorType);

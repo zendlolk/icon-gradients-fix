@@ -4,6 +4,12 @@
 
 class $modify(ProPlayLayer, PlayLayer) {
 
+    struct Fields {
+        bool m_barGradientApplied = false;
+    };
+
+    void updateBarGradient();
+
     void postUpdate(float);
 
 };

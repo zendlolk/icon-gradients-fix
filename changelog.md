@@ -1,3 +1,8 @@
+# 1.3.12
+
+* added a progress bar page to the gradient editor (arrow on the right of the menu), so the level progress bar can have a gradient too
+* fixed crash when the robot or spider gets rebuilt during a level (e.g. switching start positions)
+
 # 1.3.11
 
 * fixed crash? lets find out

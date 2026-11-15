@@ -34,6 +34,8 @@ bool PointsLayer::init(CCSize size) {
     addChild(m_shadow);
     addChild(m_icon);
 
+    createBar();
+
     setPlayerFrame(IconType::Cube);
 
     setContentSize(size);
@@ -43,6 +45,63 @@ bool PointsLayer::init(CCSize size) {
     setTouchMode(kCCTouchesOneByOne);
     
     return true;
+}
+
+// Preview of the in-game progress bar, built the same way the game builds it.
+void PointsLayer::createBar() {
+    CCSprite* groove = CCSprite::create("slidergroove2.png");
+    CCSprite* fill = CCSprite::create("sliderBar2.png");
+
+    if (!groove || !fill) return;
+
+    CCSize grooveSize = groove->getContentSize();
+    CCSize fillSize = { grooveSize.width - 4.f, 8.f };
+
+    fill->setTextureRect({ 0.f, 0.f, fillSize.width, fillSize.height });
+    fill->setColor(Utils::getPlayerColor(ColorType::Main, false));
+    fill->setPosition(grooveSize / 2.f);
+
+    groove->setPosition(grooveSize / 2.f);
+
+    m_bar = CCNode::create();
+    m_bar->setContentSize(grooveSize);
+    m_bar->setAnchorPoint({0.5f, 0.5f});
+    m_bar->setPosition({178.5f, 200});
+    m_bar->setScale(std::min(1.15f, 235.f / grooveSize.width));
+    m_bar->setVisible(false);
+
+    m_bar->addChild(fill, 1);
+    m_bar->addChild(groove, 2);
+
+    m_barFill = fill;
+
+    addChild(m_bar);
+}
+
+bool PointsLayer::hasBar() {
+    return m_barFill != nullptr;
+}
+
+void PointsLayer::setBarMode(bool barMode) {
+    if (!m_bar) return;
+
+    m_barMode = barMode;
+
+    m_bar->setVisible(barMode);
+    m_icon->setVisible(!barMode);
+    m_shadow->setVisible(!barMode);
+}
+
+// The rect gradient points are positioned relative to.
+CCSize PointsLayer::getPreviewSize() {
+    if (m_barMode)
+        return m_barFill->getContentSize() * m_bar->getScale();
+
+    return ccp(30.5f, 30) * m_icon->getScale();
+}
+
+CCPoint PointsLayer::getPreviewCenter() {
+    return m_barMode ? m_bar->getPosition() : m_icon->getPosition();
 }
 
 int PointsLayer::getPointCount() {
@@ -87,8 +146,8 @@ void PointsLayer::moveSelected(const CCPoint& move) {
 }
 
 void PointsLayer::addPoint() {
-    CCSize size = m_icon->getContentSize() * m_icon->getScale();
-    CCPoint position = m_icon->getPosition();
+    CCSize size = m_barMode ? getPreviewSize() : m_icon->getContentSize() * m_icon->getScale();
+    CCPoint position = getPreviewCenter();
 
     std::vector<CCPoint> corners = {
         {position.x - size.width / 2, position.y + size.height / 2},
@@ -270,6 +329,9 @@ void PointsLayer::updatePointScale(float value) {
 }
 
 void PointsLayer::updateGradient(GradientConfig config, ColorType colorType, bool force) {
+    if (m_barMode)
+        return Utils::applyBarGradient(m_barFill, config, false);
+
     Utils::applyGradient(m_icon, config, colorType, false, m_layer->isSecondPlayer(), 1000);
 
     m_currentColor = colorType;
@@ -331,8 +393,8 @@ void PointsLayer::setPointsHidden(bool hidden, float time) {
 CCPoint PointsLayer::getRelativePos(ColorNode* point) {
     if (!point) return {0, 0};
 
-    CCSize iconSize = ccp(30.5f, 30) * m_icon->getScale();
-    CCPoint realPos = point->getPosition() + m_pointOffset - (m_icon->getPosition() - iconSize * m_icon->getAnchorPoint());
+    CCSize iconSize = getPreviewSize();
+    CCPoint realPos = point->getPosition() + m_pointOffset - (getPreviewCenter() - iconSize * (m_barMode ? ccp(0.5f, 0.5f) : m_icon->getAnchorPoint()));
 
     return {
         realPos.x / iconSize.width,
@@ -350,8 +412,8 @@ void PointsLayer::loadPoints(GradientConfig config, bool animate) {
 
     // m_icon->runAction(CCFadeTo::create(0.05f, 0));
 
-    CCSize iconSize = ccp(30.5f, 30) * m_icon->getScale();
-    CCPoint bottomLeft = m_icon->getPosition() - iconSize / 2.f;
+    CCSize iconSize = getPreviewSize();
+    CCPoint bottomLeft = getPreviewCenter() - iconSize / 2.f;
     
     std::unordered_set<SimplePoint> replacedPoints;
     std::unordered_set<ColorNode*> movedPoints;
@@ -413,8 +475,8 @@ void PointsLayer::loadPoints(GradientConfig config, bool animate) {
 void PointsLayer::onAnimationEnded() {
     // m_icon->runAction(CCFadeTo::create(0.05f, 255));
 
-    CCSize iconSize = ccp(30.5f, 30) * m_icon->getScale();
-    CCPoint bottomLeft = m_icon->getPosition() - iconSize / 2.f;
+    CCSize iconSize = getPreviewSize();
+    CCPoint bottomLeft = getPreviewCenter() - iconSize / 2.f;
     CCPoint selectPos = {0, 0};
 
     for (ColorNode* point : m_points)

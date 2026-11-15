@@ -14,6 +14,9 @@ private:
 
     CCSprite* m_shadow = nullptr;
 
+    CCNode* m_bar = nullptr;
+    CCSprite* m_barFill = nullptr;
+
     GradientLayer* m_layer = nullptr;
 
     ColorNode* m_selectedPoint = nullptr;
@@ -35,10 +38,16 @@ private:
     ColorType m_currentColor = ColorType::Main;
     bool m_ignoreColorChange = false;
     bool m_pointsHidden = false;
+    bool m_barMode = false;
 
     bool init(CCSize);
 
     CCPoint getRelativePos(ColorNode*);
+
+    CCSize getPreviewSize();
+    CCPoint getPreviewCenter();
+
+    void createBar();
 
     bool ccTouchBegan(CCTouch*, CCEvent*) override;
     void ccTouchMoved(CCTouch*, CCEvent*) override;
@@ -71,6 +80,8 @@ public:
     void updateGradient(float);
 
     void setPlayerFrame(IconType);
+    void setBarMode(bool);
+    bool hasBar();
     void setPointsHidden(bool, float);
 
     void selectFirst();
