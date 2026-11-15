@@ -153,7 +153,7 @@ void GradientLayer::updateGlowToggle() {
 
 void GradientLayer::updatePlayerToggle() {
     Loader::get()->queueInMainThread([self = Ref(this)] {
-        self->m_playerToggle->setVisible(Utils::isSettingEnabled(P2_SEPARATE) && !self->m_barMode);
+        self->m_playerToggle->setVisible(Utils::isSettingEnabled(P2_SEPARATE) && !self->m_extraPage);
         self->m_playerToggle->toggle(false);
     });
 }
@@ -212,48 +212,64 @@ GradientLayer* GradientLayer::create() {
     return nullptr;
 }
 
-// The config being edited on the current page: the selected icon's colour, or
-// the progress bar.
+// The config being edited on the current page: the selected icon's colour, the
+// progress bar, or the wave trail.
 GradientConfig GradientLayer::getEditedConfig() {
-    if (m_barMode)
+    if (m_page == EditorPage::Bar)
         return Utils::getSavedBarConfig();
+
+    if (m_page == EditorPage::Wave)
+        return Utils::getSavedWaveConfig();
 
     return Utils::getSavedConfig(m_selectedButton->getType(), m_currentColor, m_isSecondPlayer);
 }
 
-// The bar is tinted with the main player colour in vanilla.
+// The bar and the wave trail both start from the main player colour.
 ColorType GradientLayer::getEditedColor() {
-    return m_barMode ? ColorType::Main : m_currentColor;
+    return m_extraPage ? ColorType::Main : m_currentColor;
 }
 
-void GradientLayer::onPageToggle(CCObject*) {
-    if (!m_pointsLayer->hasBar()) return;
+void GradientLayer::onPageToggle(CCObject* sender) {
+    int page = static_cast<int>(m_page) + (sender == m_prevPageButton ? -1 : 1);
 
-    m_barMode = !m_barMode;
+    if (page < 0 || page > static_cast<int>(EditorPage::Wave)) return;
+    if (!m_pointsLayer->hasPage(static_cast<EditorPage>(page))) return;
 
-    m_title->setString(m_barMode ? "Progress Bar" : "Icon Gradients");
+    m_page = static_cast<EditorPage>(page);
+    m_extraPage = m_page != EditorPage::Icons;
 
-    m_nextPageButton->setVisible(!m_barMode);
-    m_prevPageButton->setVisible(m_barMode);
+    switch (m_page) {
+        case EditorPage::Bar: m_title->setString("Progress Bar"); break;
+        case EditorPage::Wave: m_title->setString("Wave Trail"); break;
+        default: m_title->setString("Icon Gradients");
+    }
+
+    m_nextPageButton->setVisible(m_page != EditorPage::Wave);
+    m_prevPageButton->setVisible(m_extraPage);
+
+    // The wave trail has no direction to its gradient, so the two type
+    // toggles pick between a smooth blend and solid bands there.
+    m_linearLabel->setString(m_page == EditorPage::Wave ? "smooth" : "linear");
+    m_radialLabel->setString(m_page == EditorPage::Wave ? "bands" : "radial");
 
     // Everything that only makes sense for icons.
-    m_sidebarBg->setVisible(!m_barMode);
-    m_dotToggle->setVisible(!m_barMode);
-    m_mainColorToggle->setVisible(!m_barMode);
-    m_secondaryColorToggle->setVisible(!m_barMode);
-    m_glowColorToggle->setVisible(!m_barMode);
-    m_whiteColorToggle->setVisible(!m_barMode);
-    m_lineColorToggle->setVisible(!m_barMode);
-    m_playerToggle->setVisible(!m_barMode && Utils::isSettingEnabled(P2_SEPARATE));
+    m_sidebarBg->setVisible(!m_extraPage);
+    m_dotToggle->setVisible(!m_extraPage);
+    m_mainColorToggle->setVisible(!m_extraPage);
+    m_secondaryColorToggle->setVisible(!m_extraPage);
+    m_glowColorToggle->setVisible(!m_extraPage);
+    m_whiteColorToggle->setVisible(!m_extraPage);
+    m_lineColorToggle->setVisible(!m_extraPage);
+    m_playerToggle->setVisible(!m_extraPage && Utils::isSettingEnabled(P2_SEPARATE));
 
     for (IconButton* button : m_buttons)
-        button->setVisible(!m_barMode);
+        button->setVisible(!m_extraPage);
 
-    m_pointsLayer->setBarMode(m_barMode);
+    m_pointsLayer->setPage(m_page);
 
     load(m_selectedButton->getType(), m_currentColor, true, true, true);
 
-    if (!m_barMode)
+    if (!m_extraPage)
         updateGlowToggle();
 
     Loader::get()->queueInMainThread([self = Ref(this)] {
@@ -266,7 +282,7 @@ void GradientLayer::updateGradient(bool force, bool all, bool transition) {
 
     updateGarage();
 
-    if (m_barMode)
+    if (m_extraPage)
         return m_pointsLayer->updateGradient(m_currentConfig, ColorType::Main, force);
 
     Gradient gradient = Utils::getGradient(m_selectedButton->getType(), m_isSecondPlayer);
@@ -334,7 +350,7 @@ void GradientLayer::updateUI() {
 
     m_pointsLayer->setPointsHidden(m_pointsHidden, 0.f);
     
-    if (!m_barMode)
+    if (!m_extraPage)
         updateWhiteToggle();
 }
 
@@ -355,7 +371,7 @@ void GradientLayer::onAddPoint(CCObject*) {
         m_hideToggle->toggle(false);
     }
 
-    ccColor3B color = Utils::getPlayerColor(getEditedColor(), m_barMode ? false : m_isSecondPlayer);
+    ccColor3B color = Utils::getPlayerColor(getEditedColor(), m_extraPage ? false : m_isSecondPlayer);
     
     m_pointsLayer->getSelectedPoint()->setColor(color);
     m_picker->setColor(color);
@@ -430,11 +446,11 @@ void GradientLayer::onLoad(CCObject*) {
 void GradientLayer::load(IconType type, ColorType colorType, bool force, bool all, bool transition) {
     GradientConfig previousConfig = m_currentConfig;
 
-    m_currentConfig = m_barMode ? Utils::getSavedBarConfig() : Utils::getSavedConfig(type, colorType, m_isSecondPlayer);
+    m_currentConfig = m_extraPage ? getEditedConfig() : Utils::getSavedConfig(type, colorType, m_isSecondPlayer);
 
     m_pointsLayer->loadPoints(m_currentConfig, previousConfig != m_currentConfig && transition);
 
-    if (!m_barMode)
+    if (!m_extraPage)
         for (IconButton* button : m_buttons)
             if (type == button->getType()) {
                 button->setSelected(true);
@@ -447,7 +463,7 @@ void GradientLayer::load(IconType type, ColorType colorType, bool force, bool al
     m_linearToggle->toggle(m_currentConfig.isLinear);
     m_radialToggle->toggle(!m_currentConfig.isLinear);
 
-    if (!m_barMode)
+    if (!m_extraPage)
         m_dotToggle->toggle(m_selectedButton->isLocked());
 }
 
@@ -457,8 +473,11 @@ void GradientLayer::save() {
 }
 
 void GradientLayer::save(GradientConfig config, ColorType colorType) {
-    if (m_barMode)
+    if (m_page == EditorPage::Bar)
         return Utils::saveBarConfig(config);
+
+    if (m_page == EditorPage::Wave)
+        return Utils::saveWaveConfig(config);
 
     if (!m_selectedButton) return;
     
@@ -474,7 +493,7 @@ void GradientLayer::save(GradientConfig config, ColorType colorType) {
 void GradientLayer::onIconButton(CCObject* sender) {
     IconButton* button = static_cast<IconButton*>(sender);
 
-    if (m_barMode || button == m_selectedButton) return;
+    if (m_extraPage || button == m_selectedButton) return;
 
     m_pointsLayer->setPlayerFrame(button->getType());
     m_dotToggle->toggle(button->isLocked());
@@ -515,7 +534,7 @@ void GradientLayer::onTypeToggle(CCObject* sender) {
 }
 
 void GradientLayer::onLockToggle(CCObject* sender) {
-    if (!m_selectedButton || m_barMode) return;
+    if (!m_selectedButton || m_extraPage) return;
 
     if (!m_selectedButton->isLocked()) {
         m_selectedButton->setLocked(!m_selectedButton->isLocked());
@@ -551,7 +570,7 @@ void GradientLayer::onLockToggle(CCObject* sender) {
 void GradientLayer::onColorToggle(CCObject* sender) {
     ColorToggle* toggle = static_cast<ColorToggle*>(sender);
     
-    if (m_barMode || !toggle->isEnabled()) return;
+    if (m_extraPage || !toggle->isEnabled()) return;
     
     if (toggle == m_mainColorToggle && m_mainColorToggle->isSelected()) return;
     if (toggle == m_secondaryColorToggle && m_secondaryColorToggle->isSelected()) return;
@@ -659,7 +678,7 @@ void GradientLayer::keyDown(enumKeyCodes key, double timestamp) {
     if (key == enumKeyCodes::KEY_O)
         return onLoad(nullptr);
 
-    if (key == enumKeyCodes::KEY_L && !m_barMode) {
+    if (key == enumKeyCodes::KEY_L && !m_extraPage) {
         Loader::get()->queueInMainThread([self = Ref(this)] {
             self->m_dotToggle->toggle(!self->m_dotToggle->isToggled());
         });
@@ -684,7 +703,7 @@ void GradientLayer::keyDown(enumKeyCodes key, double timestamp) {
 }
 
 void GradientLayer::scrollWheel(float y, float) {
-    if (m_barMode || m_buttons.empty() || Mod::get()->getSettingValue<bool>("disable-keys")) return;
+    if (m_extraPage || m_buttons.empty() || Mod::get()->getSettingValue<bool>("disable-keys")) return;
     
     m_scroll = m_smoothScroll ? m_scroll + y : y;
     
@@ -933,7 +952,7 @@ bool GradientLayer::init() {
     m_nextPageButton = CCMenuItemSpriteExtra::create(spr, this, menu_selector(GradientLayer::onPageToggle));
     m_nextPageButton->setPosition({m_size.width + 20.f, m_size.height / 2.f});
 
-    m_nextPageButton->setVisible(m_pointsLayer->hasBar());
+    m_nextPageButton->setVisible(m_pointsLayer->hasPage(EditorPage::Bar));
 
     m_buttonMenu->addChild(m_nextPageButton);
 
@@ -965,11 +984,15 @@ bool GradientLayer::init() {
 
     m_mainLayer->addChild(lbl);
 
+    m_linearLabel = lbl;
+
     lbl = CCLabelBMFont::create("radial", "bigFont.fnt");
     lbl->setScale(0.255f);
     lbl->setPosition({283.31f, 86});
 
     m_mainLayer->addChild(lbl);
+
+    m_radialLabel = lbl;
 
     m_countLabel = CCLabelBMFont::create("3/24", "chatFont.fnt");
     m_countLabel->setOpacity(0);

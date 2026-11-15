@@ -26,6 +26,13 @@ public:
     static GradientConfig getDefaultBarConfig();
     static GradientConfig getSavedBarConfig();
     static void saveBarConfig(GradientConfig);
+
+    static GradientConfig getDefaultWaveConfig();
+    static GradientConfig getSavedWaveConfig();
+    static void saveWaveConfig(GradientConfig);
+    static std::vector<WaveBand> computeWaveBands(const GradientConfig&);
+    static const std::vector<WaveBand>& getWaveBands();
+    static void invalidateWaveBands();
     static matjson::Value getSaveObject(GradientConfig);
 
     static Gradient getGradient(IconType, bool);

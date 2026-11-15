@@ -71,7 +71,13 @@ private:
     bool m_ignoreColorChange = false;
     bool m_pointsHidden = false;
     bool m_smoothScroll = false;
-    bool m_barMode = false;
+    // True on every page other than the icons page.
+    bool m_extraPage = false;
+
+    EditorPage m_page = EditorPage::Icons;
+
+    CCLabelBMFont* m_linearLabel = nullptr;
+    CCLabelBMFont* m_radialLabel = nullptr;
     
     float m_scroll = 0.f;
 

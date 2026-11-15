@@ -637,6 +637,9 @@ void ProPlayerObject::createSpider(int p0) {
 bool ProPlayerObject::init(int p0, int p1, GJBaseGameLayer* p2, CCLayer* p3, bool p4) {
     if (!PlayerObject::init(p0, p1, p2, p3, p4)) return false;
 
+    // Player colours may have changed since the wave trail bands were cached.
+    Utils::invalidateWaveBands();
+
     auto f = m_fields.self();
     
     f->m_thatOneUfoShipAndCubeModIsLoaded = Loader::get()->isModLoaded("yellowcat98.custom_ufo_n_ship_cube");

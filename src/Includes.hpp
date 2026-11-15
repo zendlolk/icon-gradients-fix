@@ -24,6 +24,18 @@ enum ColorType {
     Line = 5,
 };
 
+enum class EditorPage {
+    Icons = 0,
+    Bar = 1,
+    Wave = 2
+};
+
+// One layer of the wave trail: drawn at `scale` of the full trail width.
+struct WaveBand {
+    float scale;
+    ccColor3B color;
+};
+
 struct SimplePoint {
     CCPoint pos;
     ccColor3B color;

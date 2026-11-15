@@ -1,4 +1,6 @@
 #include "Utils.hpp"
+
+#include <algorithm>
 #include "Cache.hpp"
 
 #include "Hooks/SimplePlayer.hpp"
@@ -189,6 +191,134 @@ GradientConfig Utils::getSavedBarConfig() {
 
 void Utils::saveBarConfig(GradientConfig config) {
     saveConfig(config, "progress-bar", "bar");
+}
+
+// Wave trail points all sit on one line across the trail: y 0.5 is the middle
+// of the trail, y 0 and 1 are its edges. Only the distance from the middle
+// matters, so the trail is always symmetric.
+GradientConfig Utils::getDefaultWaveConfig() {
+    ccColor3B color = getPlayerColor(ColorType::Main, false);
+
+    return GradientConfig{
+        {
+            {{0.5f, 0.5f}, color},
+            {{0.5f, 1.f}, color}
+        },
+        false
+    };
+}
+
+GradientConfig Utils::getSavedWaveConfig() {
+    if (!Mod::get()->hasSavedValue("wave-trail"))
+        return getDefaultWaveConfig();
+
+    matjson::Value container = Mod::get()->getSavedValue<matjson::Value>("wave-trail");
+
+    if (!container.contains("trail"))
+        return getDefaultWaveConfig();
+
+    return configFromObject(container["trail"]);
+}
+
+static bool s_waveBandsDirty = true;
+
+void Utils::saveWaveConfig(GradientConfig config) {
+    // Pasted or loaded gradients can come from an icon; keep them on the line.
+    for (SimplePoint& point : config.points)
+        point.pos.x = 0.5f;
+
+    saveConfig(config, "wave-trail", "trail");
+    invalidateWaveBands();
+}
+
+void Utils::invalidateWaveBands() {
+    s_waveBandsDirty = true;
+}
+
+// Turns the points into layers ordered from the full-width outer layer to the
+// thinnest inner one, so drawing them in order paints the trail's
+// cross-section. isLinear means a smooth blend, otherwise each colour is a
+// solid band reaching halfway to its neighbours.
+std::vector<WaveBand> Utils::computeWaveBands(const GradientConfig& config) {
+    std::vector<std::pair<float, ccColor3B>> stops;
+
+    for (const SimplePoint& point : config.points)
+        stops.push_back({
+            std::clamp(std::abs(point.pos.y - 0.5f) * 2.f, 0.f, 1.f),
+            point.color
+        });
+
+    std::stable_sort(stops.begin(), stops.end(), [](const auto& a, const auto& b) {
+        return a.first < b.first;
+    });
+
+    std::vector<WaveBand> bands;
+
+    if (stops.empty()) return bands;
+
+    if (!config.isLinear) {
+        bands.push_back({ 1.f, stops.back().second });
+
+        for (int i = static_cast<int>(stops.size()) - 2; i >= 0; i--) {
+            float scale = (stops[i].first + stops[i + 1].first) / 2.f;
+
+            if (scale < 0.02f || scale >= bands.back().scale) continue;
+
+            bands.push_back({ scale, stops[i].second });
+        }
+
+        return bands;
+    }
+
+    const int steps = 16;
+
+    for (int i = 0; i < steps; i++) {
+        float scale = 1.f - static_cast<float>(i) / steps;
+        float t = scale - 0.5f / steps;
+
+        ccColor3B color = stops.back().second;
+
+        if (t <= stops.front().first)
+            color = stops.front().second;
+        else
+            for (size_t j = 0; j + 1 < stops.size(); j++) {
+                float a = stops[j].first;
+                float b = stops[j + 1].first;
+
+                if (t > b) continue;
+
+                float local = b - a > 0.0001f ? (t - a) / (b - a) : 1.f;
+
+                color = ccc3(
+                    static_cast<GLubyte>(stops[j].second.r + (stops[j + 1].second.r - stops[j].second.r) * local),
+                    static_cast<GLubyte>(stops[j].second.g + (stops[j + 1].second.g - stops[j].second.g) * local),
+                    static_cast<GLubyte>(stops[j].second.b + (stops[j + 1].second.b - stops[j].second.b) * local)
+                );
+
+                break;
+            }
+
+        bands.push_back({ scale, color });
+    }
+
+    return bands;
+}
+
+// Bands for the in-game trail. Empty means leave the vanilla trail alone.
+const std::vector<WaveBand>& Utils::getWaveBands() {
+    static std::vector<WaveBand> bands;
+
+    if (s_waveBandsDirty) {
+        s_waveBandsDirty = false;
+
+        GradientConfig config = getSavedWaveConfig();
+
+        bands = config.isEmpty(ColorType::Main, false)
+            ? std::vector<WaveBand>{}
+            : computeWaveBands(config);
+    }
+
+    return bands;
 }
 
 // rectInPixels, when given, is the texture area the gradient spans. The

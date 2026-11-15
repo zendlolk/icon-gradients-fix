@@ -35,6 +35,7 @@ bool PointsLayer::init(CCSize size) {
     addChild(m_icon);
 
     createBar();
+    createWave();
 
     setPlayerFrame(IconType::Cube);
 
@@ -78,30 +79,84 @@ void PointsLayer::createBar() {
     addChild(m_bar);
 }
 
-bool PointsLayer::hasBar() {
-    return m_barFill != nullptr;
+// Preview of a straight piece of wave trail. Points on this page only move
+// along the vertical line through its middle.
+void PointsLayer::createWave() {
+    CCSize size = { 150.f, 56.f };
+
+    m_wave = CCNode::create();
+    m_wave->setContentSize(size);
+    m_wave->setAnchorPoint({0.5f, 0.5f});
+    m_wave->setPosition({178.5f, 200});
+    m_wave->setVisible(false);
+
+    m_waveDraw = CCDrawNode::create();
+    m_waveDraw->setBlendFunc({ GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA });
+
+    m_wave->addChild(m_waveDraw);
+
+    SimplePlayer* icon = Utils::createIcon(IconType::Wave);
+    icon->setScale(1.6f);
+    icon->setPosition({size.width + 4.f, size.height / 2.f});
+
+    Utils::setIconColors(icon, ColorType::Main, false, false);
+
+    m_wave->addChild(icon, 1);
+
+    addChild(m_wave);
 }
 
-void PointsLayer::setBarMode(bool barMode) {
-    if (!m_bar) return;
+bool PointsLayer::hasPage(EditorPage page) {
+    switch (page) {
+        case EditorPage::Bar: return m_barFill != nullptr;
+        case EditorPage::Wave: return m_waveDraw != nullptr;
+        default: return true;
+    }
+}
 
-    m_barMode = barMode;
+void PointsLayer::setPage(EditorPage page) {
+    if (!hasPage(page)) return;
 
-    m_bar->setVisible(barMode);
-    m_icon->setVisible(!barMode);
-    m_shadow->setVisible(!barMode);
+    m_page = page;
+
+    if (m_bar)
+        m_bar->setVisible(page == EditorPage::Bar);
+
+    if (m_wave)
+        m_wave->setVisible(page == EditorPage::Wave);
+
+    m_icon->setVisible(page == EditorPage::Icons);
+    m_shadow->setVisible(page == EditorPage::Icons);
 }
 
 // The rect gradient points are positioned relative to.
 CCSize PointsLayer::getPreviewSize() {
-    if (m_barMode)
-        return m_barFill->getContentSize() * m_bar->getScale();
-
-    return ccp(30.5f, 30) * m_icon->getScale();
+    switch (m_page) {
+        case EditorPage::Bar: return m_barFill->getContentSize() * m_bar->getScale();
+        case EditorPage::Wave: return m_wave->getContentSize();
+        default: return ccp(30.5f, 30) * m_icon->getScale();
+    }
 }
 
 CCPoint PointsLayer::getPreviewCenter() {
-    return m_barMode ? m_bar->getPosition() : m_icon->getPosition();
+    switch (m_page) {
+        case EditorPage::Bar: return m_bar->getPosition();
+        case EditorPage::Wave: return m_wave->getPosition();
+        default: return m_icon->getPosition();
+    }
+}
+
+// Wave trail points stay on the line across the middle of the preview.
+CCPoint PointsLayer::constrainPoint(CCPoint pos) {
+    if (m_page != EditorPage::Wave) return pos;
+
+    CCPoint center = getPreviewCenter();
+    float halfHeight = getPreviewSize().height / 2.f;
+
+    return {
+        center.x,
+        std::max(center.y - halfHeight, std::min(pos.y, center.y + halfHeight))
+    };
 }
 
 int PointsLayer::getPointCount() {
@@ -141,12 +196,12 @@ void PointsLayer::moveSelected(const CCPoint& move) {
     pos.x = std::max(0.f, std::min(pos.x, getContentSize().width));
     pos.y = std::max(0.f, std::min(pos.y, getContentSize().height));
     
-    m_selectedPoint->setPosition(pos);
+    m_selectedPoint->setPosition(constrainPoint(pos));
     m_layer->pointMoved();
 }
 
 void PointsLayer::addPoint() {
-    CCSize size = m_barMode ? getPreviewSize() : m_icon->getContentSize() * m_icon->getScale();
+    CCSize size = m_page != EditorPage::Icons ? getPreviewSize() : m_icon->getContentSize() * m_icon->getScale();
     CCPoint position = getPreviewCenter();
 
     std::vector<CCPoint> corners = {
@@ -155,6 +210,14 @@ void PointsLayer::addPoint() {
         {position.x - size.width / 2, position.y - size.height / 2},
         {position.x + size.width / 2, position.y - size.height / 2}
     };
+
+    // On the wave page new points go on the line: edge, middle, then between.
+    if (m_page == EditorPage::Wave) {
+        corners.clear();
+
+        for (float y : { 0.5f, 0.f, 0.25f, 0.375f, 0.125f })
+            corners.push_back({position.x, position.y + size.height * y});
+    }
 
     CCPoint pos = {0, 0};
     
@@ -276,7 +339,7 @@ void PointsLayer::ccTouchMoved(CCTouch* touch, CCEvent* event) {
         pos.x = std::max(0.f, std::min(pos.x, getContentSize().width));
         pos.y = std::max(0.f, std::min(pos.y, getContentSize().height));
 
-        m_selectedPoint->setPosition(pos);
+        m_selectedPoint->setPosition(constrainPoint(pos));
 
         m_layer->pointMoved();
     }
@@ -329,8 +392,31 @@ void PointsLayer::updatePointScale(float value) {
 }
 
 void PointsLayer::updateGradient(GradientConfig config, ColorType colorType, bool force) {
-    if (m_barMode)
+    if (m_page == EditorPage::Bar)
         return Utils::applyBarGradient(m_barFill, config, false);
+
+    if (m_page == EditorPage::Wave) {
+        CCSize size = m_wave->getContentSize();
+
+        m_waveDraw->clear();
+
+        for (const WaveBand& band : Utils::computeWaveBands(config)) {
+            float halfHeight = size.height * band.scale / 2.f;
+
+            CCPoint verts[4] = {
+                {0.f, size.height / 2.f - halfHeight},
+                {0.f, size.height / 2.f + halfHeight},
+                {size.width, size.height / 2.f + halfHeight},
+                {size.width, size.height / 2.f - halfHeight}
+            };
+
+            ccColor4F color = ccc4FFromccc3B(band.color);
+
+            m_waveDraw->drawPolygon(verts, 4, color, 0.f, color);
+        }
+
+        return;
+    }
 
     Utils::applyGradient(m_icon, config, colorType, false, m_layer->isSecondPlayer(), 1000);
 
@@ -394,7 +480,7 @@ CCPoint PointsLayer::getRelativePos(ColorNode* point) {
     if (!point) return {0, 0};
 
     CCSize iconSize = getPreviewSize();
-    CCPoint realPos = point->getPosition() + m_pointOffset - (getPreviewCenter() - iconSize * (m_barMode ? ccp(0.5f, 0.5f) : m_icon->getAnchorPoint()));
+    CCPoint realPos = point->getPosition() + m_pointOffset - (getPreviewCenter() - iconSize * (m_page != EditorPage::Icons ? ccp(0.5f, 0.5f) : m_icon->getAnchorPoint()));
 
     return {
         realPos.x / iconSize.width,
