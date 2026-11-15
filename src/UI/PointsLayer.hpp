@@ -23,6 +23,10 @@ private:
     BarGlowEffects m_barEffects;
 
     float m_barPreviewTime = 0.f;
+    float m_barPreviewFrom = 0.f;
+    float m_barPreviewSpeed = 0.5f;
+
+    bool m_barPreviewEnabled = true;
     float m_barFlashPhase = 0.f;
 
     CCNode* m_wave = nullptr;
@@ -99,6 +103,9 @@ public:
     void updateGradient(float);
 
     void setPlayerFrame(IconType);
+    void setBarPreview(bool, float);
+    void restartBarPreview(float);
+
     void setPage(EditorPage);
     bool hasPage(EditorPage);
     void setPointsHidden(bool, float);

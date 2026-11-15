@@ -158,6 +158,20 @@ void PointsLayer::setPage(EditorPage page) {
     m_shadow->setVisible(page == EditorPage::Icons);
 }
 
+// Whether the preview loop plays, and how fast (0 to 1).
+void PointsLayer::setBarPreview(bool enabled, float speed) {
+    m_barPreviewEnabled = enabled;
+    m_barPreviewSpeed = std::clamp(speed, 0.f, 1.f);
+}
+
+// Starts the preview loop over from a point on the bar (0 to 1). The run
+// still counts as a normal one from 0%, not as a start position.
+void PointsLayer::restartBarPreview(float from) {
+    m_barPreviewFrom = std::clamp(from, 0.f, 0.99f);
+    m_barPreviewTime = 0.f;
+    m_barFlashPhase = 0.f;
+}
+
 // Shows the preview bar filled to `progress` with its glow at `strength`.
 void PointsLayer::setBarPreviewFill(float progress, float strength) {
     if (!m_barFill) return;
@@ -172,17 +186,21 @@ void PointsLayer::setBarPreviewFill(float progress, float strength) {
 void PointsLayer::updateBarPreview(float dt) {
     if (!m_barFill || m_page != EditorPage::Bar) return;
 
-    if (!m_barGlow || !m_barGlow->isVisible() || (!m_barEffects.buildUp && !m_barEffects.flash)) {
+    if (!m_barPreviewEnabled || !m_barGlow || !m_barGlow->isVisible() || (!m_barEffects.buildUp && !m_barEffects.flash)) {
         m_barPreviewTime = 0.f;
         m_barFlashPhase = 0.f;
 
         return setBarPreviewFill(1.f, 1.f);
     }
 
-    // Four seconds to fill, then a pause while full.
-    m_barPreviewTime = std::fmod(m_barPreviewTime + dt, 5.f);
+    // Fills from the chosen starting point, pauses while full, then loops.
+    // A whole bar takes between 12 seconds and 1.5, by the speed setting.
+    float duration = 12.f - 10.5f * m_barPreviewSpeed;
+    float span = std::max(0.01f, 1.f - m_barPreviewFrom);
 
-    float progress = std::min(1.f, m_barPreviewTime / 4.f);
+    m_barPreviewTime = std::fmod(m_barPreviewTime + dt, duration * span + 1.f);
+
+    float progress = std::min(1.f, m_barPreviewFrom + m_barPreviewTime / duration);
     float rate = Utils::getBarFlashRate(m_barEffects, progress, 0.f, false);
 
     if (rate > 0.f)

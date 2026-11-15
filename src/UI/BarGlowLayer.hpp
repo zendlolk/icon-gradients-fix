@@ -17,6 +17,10 @@ private:
     CCMenuItemToggler* m_flashToggle = nullptr;
     CCMenuItemToggler* m_startPosToggle = nullptr;
 
+    // Switch between a straight line and a curve.
+    CCMenuItemToggler* m_buildCurveToggle = nullptr;
+    CCMenuItemToggler* m_flashCurveToggle = nullptr;
+
     Slider* m_buildPowerSlider = nullptr;
     Slider* m_flashStartSlider = nullptr;
     Slider* m_flashSpeedSlider = nullptr;
@@ -31,10 +35,21 @@ private:
     CCLabelBMFont* m_flashPowerLabel = nullptr;
     CCLabelBMFont* m_startPosOffsetLabel = nullptr;
 
+    CCDrawNode* m_buildGraph = nullptr;
+    CCDrawNode* m_flashGraph = nullptr;
+
+    // Only shown while the matching curve is exponential.
+    std::vector<CCNode*> m_buildCurveNodes;
+    std::vector<CCNode*> m_flashCurveNodes;
+
     bool init() override;
 
     CCMenuItemToggler* addToggle(const char*, float, bool);
-    Slider* addSlider(const char*, float, float, CCLabelBMFont*&);
+    CCMenuItemToggler* addCurveToggle(const char*, float, bool);
+    Slider* addSlider(const char*, float, float, CCLabelBMFont*&, std::vector<CCNode*>* = nullptr);
+    CCDrawNode* addGraph(float, std::vector<CCNode*>&);
+
+    void drawGraph(CCDrawNode*, float);
 
     void onToggle(CCObject*);
     void onSlider(CCObject*);

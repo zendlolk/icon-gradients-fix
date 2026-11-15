@@ -1561,11 +1561,13 @@ BarGlowEffects Utils::getBarGlowEffects() {
     };
 
     effects.buildUp = saved["build-up"].asBool().unwrapOr(effects.buildUp);
+    effects.buildExponential = saved["build-exponential"].asBool().unwrapOr(effects.buildExponential);
     effects.buildPower = number("build-power", effects.buildPower, 1.f, 6.f);
     effects.flash = saved["flash"].asBool().unwrapOr(effects.flash);
     effects.flashStart = number("flash-start", effects.flashStart, 0.f, 1.f);
     effects.flashSpeed = number("flash-speed", effects.flashSpeed, 0.f, 1.f);
     effects.flashIntensity = number("flash-intensity", effects.flashIntensity, 0.f, 1.f);
+    effects.flashExponential = saved["flash-exponential"].asBool().unwrapOr(effects.flashExponential);
     effects.flashPower = number("flash-power", effects.flashPower, 1.f, 6.f);
     effects.flashFromStartPos = saved["flash-start-pos"].asBool().unwrapOr(effects.flashFromStartPos);
     effects.startPosOffset = number("start-pos-offset", effects.startPosOffset, 0.f, 1.f);
@@ -1577,11 +1579,13 @@ void Utils::saveBarGlowEffects(const BarGlowEffects& effects) {
     matjson::Value saved = matjson::Value{};
 
     saved["build-up"] = effects.buildUp;
+    saved["build-exponential"] = effects.buildExponential;
     saved["build-power"] = effects.buildPower;
     saved["flash"] = effects.flash;
     saved["flash-start"] = effects.flashStart;
     saved["flash-speed"] = effects.flashSpeed;
     saved["flash-intensity"] = effects.flashIntensity;
+    saved["flash-exponential"] = effects.flashExponential;
     saved["flash-power"] = effects.flashPower;
     saved["flash-start-pos"] = effects.flashFromStartPos;
     saved["start-pos-offset"] = effects.startPosOffset;
@@ -1606,7 +1610,7 @@ float Utils::getBarFlashRate(const BarGlowEffects& effects, float progress, floa
     const float slowest = 0.6f;
     float fastest = 2.f + effects.flashSpeed * 14.f;
 
-    return slowest + (fastest - slowest) * std::pow(along, effects.flashPower);
+    return slowest + (fastest - slowest) * std::pow(along, effects.flashExponential ? effects.flashPower : 1.f);
 }
 
 // Glow strength from 0 to 1 of what was set. A flash only ever dims the
@@ -1615,7 +1619,7 @@ float Utils::getBarGlowStrength(const BarGlowEffects& effects, float progress, f
     float strength = 1.f;
 
     if (effects.buildUp)
-        strength = std::pow(std::clamp(progress, 0.f, 1.f), effects.buildPower);
+        strength = std::pow(std::clamp(progress, 0.f, 1.f), effects.buildExponential ? effects.buildPower : 1.f);
 
     if (flashing)
         strength *= 1.f - effects.flashIntensity * (0.5f - 0.5f * std::cos(flashPhase * 6.2831853f));

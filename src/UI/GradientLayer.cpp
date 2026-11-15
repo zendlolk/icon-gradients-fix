@@ -125,6 +125,9 @@ void GradientLayer::updateGlowControls(bool updateLink) {
     // Build-up and flashing only exist for the progress bar.
     m_barGlowButton->setVisible(m_page == EditorPage::Bar);
 
+    for (CCNode* node : m_barPreviewNodes)
+        node->setVisible(m_page == EditorPage::Bar);
+
     if (updateLink)
         m_glowLinkToggle->toggle(Utils::isGlowLinked());
 
@@ -166,6 +169,34 @@ void GradientLayer::onGlowSlider(CCObject*) {
     Utils::saveGlow(getGlowTarget(), glow, m_isSecondPlayer);
 
     refreshGlow(glow.enabled && size != glow.size);
+}
+
+void GradientLayer::onBarPreviewToggle(CCObject*) {
+    // A toggler only flips after its callback.
+    bool enabled = !m_barPreviewToggle->isToggled();
+
+    Mod::get()->setSavedValue("bar-preview", enabled);
+
+    m_pointsLayer->setBarPreview(enabled, m_barPreviewSlider->getValue());
+}
+
+void GradientLayer::onBarPreviewSlider(CCObject*) {
+    float speed = std::clamp(m_barPreviewSlider->getValue(), 0.f, 1.f);
+
+    Mod::get()->setSavedValue("bar-preview-speed", static_cast<double>(speed));
+
+    m_pointsLayer->setBarPreview(m_barPreviewToggle->isToggled(), speed);
+}
+
+// Plays the preview from the percentage typed into the box.
+void GradientLayer::onBarPreviewStart(CCObject*) {
+    int percent = std::clamp(numFromString<int>(m_barPreviewInput->getString()).unwrapOr(0), 0, 99);
+
+    m_barPreviewInput->setString(std::to_string(percent).c_str());
+
+    Mod::get()->setSavedValue("bar-preview-from", percent);
+
+    m_pointsLayer->restartBarPreview(percent / 100.f);
 }
 
 void GradientLayer::onBarGlowOptions(CCObject*) {
@@ -321,8 +352,16 @@ void GradientLayer::onPageToggle(CCObject* sender) {
     if (page < 0 || page > static_cast<int>(EditorPage::Wave)) return;
     if (!m_pointsLayer->hasPage(static_cast<EditorPage>(page))) return;
 
+    bool wasExtraPage = m_extraPage;
+
     m_page = static_cast<EditorPage>(page);
     m_extraPage = m_page != EditorPage::Icons;
+
+    // Without the icon list on the left, everything sits half its width too
+    // far right. Centre it on the other pages.
+    if (wasExtraPage != m_extraPage)
+        for (CCNode* node : m_shiftNodes)
+            node->setPositionX(node->getPositionX() + (m_extraPage ? -18.5f : 18.5f));
 
     switch (m_page) {
         case EditorPage::Bar: m_title->setString("Progress Bar"); break;
@@ -1149,6 +1188,80 @@ bool GradientLayer::init() {
     m_buttonMenu->addChild(m_barGlowButton);
     glowRow.push_back(m_barGlowButton);
 
+    // Controls for the progress bar's preview loop, where the icon colour
+    // slots are on the first page.
+    m_barPreviewToggle = CCMenuItemToggler::createWithStandardSprites(this, menu_selector(GradientLayer::onBarPreviewToggle), 0.4f);
+    m_barPreviewToggle->setPosition({232, 66});
+    m_barPreviewToggle->toggle(Mod::get()->getSavedValue<bool>("bar-preview", true));
+
+    m_buttonMenu->addChild(m_barPreviewToggle);
+    m_barPreviewNodes.push_back(m_barPreviewToggle);
+
+    lbl = CCLabelBMFont::create("preview", "bigFont.fnt");
+    lbl->setScale(0.27f);
+    lbl->setAnchorPoint({0.f, 0.5f});
+    lbl->setPosition({243, 66});
+
+    m_mainLayer->addChild(lbl);
+    m_barPreviewNodes.push_back(lbl);
+
+    lbl = CCLabelBMFont::create("speed", "bigFont.fnt");
+    lbl->setScale(0.2f);
+    lbl->setOpacity(140);
+    lbl->setPosition({233, 48});
+
+    m_mainLayer->addChild(lbl);
+    m_barPreviewNodes.push_back(lbl);
+
+    m_barPreviewSlider = Slider::create(this, menu_selector(GradientLayer::onBarPreviewSlider), 0.28f);
+    m_barPreviewSlider->setPosition({275, 48});
+    m_barPreviewSlider->setValue(std::clamp(static_cast<float>(Mod::get()->getSavedValue<double>("bar-preview-speed", 0.5)), 0.f, 1.f));
+
+    m_mainLayer->addChild(m_barPreviewSlider);
+    m_barPreviewNodes.push_back(m_barPreviewSlider);
+
+    lbl = CCLabelBMFont::create("from", "bigFont.fnt");
+    lbl->setScale(0.2f);
+    lbl->setOpacity(140);
+    lbl->setPosition({232, 28});
+
+    m_mainLayer->addChild(lbl);
+    m_barPreviewNodes.push_back(lbl);
+
+    m_barPreviewInput = TextInput::create(50, "0");
+    m_barPreviewInput->setScale(0.5f);
+    m_barPreviewInput->setPosition({259, 28});
+    m_barPreviewInput->setString(std::to_string(std::clamp(Mod::get()->getSavedValue<int>("bar-preview-from", 0), 0, 99)).c_str());
+    m_barPreviewInput->getInputNode()->setAllowedChars("0123456789");
+    m_barPreviewInput->getInputNode()->setMaxLabelLength(2);
+
+    m_mainLayer->addChild(m_barPreviewInput);
+    m_barPreviewNodes.push_back(m_barPreviewInput);
+
+    lbl = CCLabelBMFont::create("%", "bigFont.fnt");
+    lbl->setScale(0.2f);
+    lbl->setOpacity(140);
+    lbl->setPosition({277, 28});
+
+    m_mainLayer->addChild(lbl);
+    m_barPreviewNodes.push_back(lbl);
+
+    spr = CCSprite::createWithSpriteFrameName("GJ_arrow_03_001.png");
+    spr->setFlipX(true);
+    spr->setScale(0.3f);
+
+    CCMenuItemSpriteExtra* previewStart = CCMenuItemSpriteExtra::create(spr, this, menu_selector(GradientLayer::onBarPreviewStart));
+    previewStart->setPosition({294, 28});
+
+    m_buttonMenu->addChild(previewStart);
+    m_barPreviewNodes.push_back(previewStart);
+
+    m_pointsLayer->setBarPreview(
+        Mod::get()->getSavedValue<bool>("bar-preview", true),
+        m_barPreviewSlider->getValue()
+    );
+    m_pointsLayer->restartBarPreview(std::clamp(Mod::get()->getSavedValue<int>("bar-preview-from", 0), 0, 99) / 100.f);
+
     m_playerToggle = PlayerToggle::create(this);
     m_playerToggle->setPosition({78, 260.5f});
     m_playerToggle->setVisible(Utils::isSettingEnabled(P2_SEPARATE));
@@ -1289,8 +1402,11 @@ bool GradientLayer::init() {
 
     for (CCNode* parent : { static_cast<CCNode*>(m_mainLayer), static_cast<CCNode*>(m_buttonMenu) })
         for (CCNode* child : parent->getChildrenExt<CCNode*>())
-            if (std::find(keep.begin(), keep.end(), child) == keep.end())
+            if (std::find(keep.begin(), keep.end(), child) == keep.end()) {
                 child->setPositionY(child->getPositionY() + glowRowHeight);
+
+                m_shiftNodes.push_back(child);
+            }
 
     return true;
 }

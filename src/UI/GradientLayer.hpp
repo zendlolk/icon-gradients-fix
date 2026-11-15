@@ -42,6 +42,15 @@ private:
 
     CCMenuItemToggler* m_glowLinkToggle = nullptr;
     CCMenuItemSpriteExtra* m_barGlowButton = nullptr;
+
+    CCMenuItemToggler* m_barPreviewToggle = nullptr;
+    Slider* m_barPreviewSlider = nullptr;
+    TextInput* m_barPreviewInput = nullptr;
+
+    std::vector<CCNode*> m_barPreviewNodes;
+
+    // Everything that moves sideways when the icon list is not shown.
+    std::vector<CCNode*> m_shiftNodes;
     CCLabelBMFont* m_glowLinkLabel = nullptr;
 
     CCLabelBMFont* m_countLabel = nullptr;
@@ -113,6 +122,9 @@ private:
 
     void onGlowLink(CCObject*);
     void onBarGlowOptions(CCObject*);
+    void onBarPreviewToggle(CCObject*);
+    void onBarPreviewSlider(CCObject*);
+    void onBarPreviewStart(CCObject*);
 
     GlowTarget getGlowTarget();
 
