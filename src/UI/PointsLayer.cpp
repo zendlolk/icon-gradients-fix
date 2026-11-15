@@ -104,20 +104,6 @@ void PointsLayer::createWave() {
     m_wave->addChild(m_waveIcon, 1);
 
     addChild(m_wave);
-
-    // The glow can reach well past the trail, so it is clipped to the preview
-    // area to keep it off the rest of the editor.
-    CCLayerColor* stencil = CCLayerColor::create({255, 255, 255, 255}, 228.f, 100.f);
-    stencil->setPosition({74.f, 150.f});
-
-    CCClippingNode* clip = CCClippingNode::create(stencil);
-
-    m_waveGlowDraw = CCDrawNode::create();
-    m_waveGlowDraw->setBlendFunc({ GL_ONE, GL_ONE });
-
-    clip->addChild(m_waveGlowDraw);
-
-    addChild(clip);
 }
 
 // A bigger glow needs more room, so the previewed trail gets thinner as the
@@ -127,10 +113,7 @@ void PointsLayer::updateWaveLayout() {
 
     WaveGlowSettings glow = Utils::getWaveGlow(m_layer->isSecondPlayer());
 
-    float halfHeight = 28.f;
-
-    if (glow.enabled)
-        halfHeight = std::clamp(46.f / (1.f + Utils::getWaveGlowSigma(glow) * 2.5f), 14.f, 28.f);
+    float halfHeight = std::clamp(44.f / Utils::getWaveGlowReach(glow), 11.f, 28.f);
 
     m_wave->setContentSize({ 150.f, halfHeight * 2.f });
     m_waveIcon->setPosition({ 154.f, halfHeight });
@@ -176,17 +159,24 @@ CCPoint PointsLayer::getPreviewCenter() {
     }
 }
 
-// Wave trail points stay on the line across the middle of the preview.
+// Wave trail points stay on the line across the middle of the preview, and
+// progress bar points on the line along the bar.
 CCPoint PointsLayer::constrainPoint(CCPoint pos) {
-    if (m_page != EditorPage::Wave) return pos;
+    if (m_page == EditorPage::Icons) return pos;
 
     CCPoint center = getPreviewCenter();
-    float halfHeight = getPreviewSize().height / 2.f;
+    CCSize half = getPreviewSize() / 2.f;
 
-    return {
+    if (m_page == EditorPage::Bar)
+        return ccp(
+            std::max(center.x - half.width, std::min(pos.x, center.x + half.width)),
+            center.y
+        );
+
+    return ccp(
         center.x,
-        std::max(center.y - halfHeight, std::min(pos.y, center.y + halfHeight))
-    };
+        std::max(center.y - half.height, std::min(pos.y, center.y + half.height))
+    );
 }
 
 int PointsLayer::getPointCount() {
@@ -247,6 +237,14 @@ void PointsLayer::addPoint() {
 
         for (float y : { 0.5f, 0.f, 0.25f, 0.375f, 0.125f })
             corners.push_back({position.x, position.y + size.height * y});
+    }
+
+    // On the bar page they go along the bar: ends, middle, then between.
+    if (m_page == EditorPage::Bar) {
+        corners.clear();
+
+        for (float x : { -0.5f, 0.5f, 0.f, -0.25f, 0.25f, -0.375f, 0.375f })
+            corners.push_back({position.x + size.width * x, position.y});
     }
 
     CCPoint pos = {0, 0};
@@ -429,29 +427,14 @@ void PointsLayer::updateGradient(GradientConfig config, ColorType colorType, boo
         bool secondPlayer = m_layer->isSecondPlayer();
 
         CCSize size = m_wave->getContentSize();
-        CCPoint center = m_wave->getPosition();
 
-        std::vector<WaveBand> bands = Utils::computeWaveBands(config);
-        std::vector<ccV2F_C4B_T2F> glowVertices;
-
-        Utils::buildWaveGlowMesh(
-            {
-                { center.x - size.width / 2.f, center.y },
-                { center.x + size.width / 2.f, center.y }
-            },
-            size.height / 2.f,
-            Utils::computeWaveGlow(bands, Utils::getWaveGlow(secondPlayer)),
-            1.f,
-            glowVertices
-        );
-
-        Utils::setDrawNodeVertices(m_waveGlowDraw, glowVertices);
         Utils::setIconColors(m_waveIcon, ColorType::Main, false, secondPlayer);
 
         m_waveDraw->clear();
 
-        for (const WaveBand& band : bands) {
-            float halfHeight = size.height * band.scale / 2.f;
+        // Same layers the game draws, as stacked strips of a straight trail.
+        for (const WaveLayer& layer : Utils::computeWaveLayers(config, Utils::getWaveGlow(secondPlayer))) {
+            float halfHeight = size.height * layer.scale / 2.f;
 
             CCPoint verts[4] = {
                 {0.f, size.height / 2.f - halfHeight},
@@ -460,7 +443,7 @@ void PointsLayer::updateGradient(GradientConfig config, ColorType colorType, boo
                 {size.width, size.height / 2.f - halfHeight}
             };
 
-            ccColor4F color = ccc4FFromccc3B(band.color);
+            ccColor4F color = ccc4FFromccc4B(layer.color);
 
             m_waveDraw->drawPolygon(verts, 4, color, 0.f, color);
         }
@@ -541,8 +524,6 @@ CCPoint PointsLayer::getRelativePos(ColorNode* point) {
 void PointsLayer::loadPoints(GradientConfig config, bool animate) {
     if (m_page == EditorPage::Wave)
         updateWaveLayout();
-    else if (m_waveGlowDraw)
-        m_waveGlowDraw->clear();
 
     updateCenter();
 

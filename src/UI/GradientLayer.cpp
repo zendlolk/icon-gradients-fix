@@ -114,7 +114,7 @@ void GradientLayer::updateGlowControls() {
     WaveGlowSettings glow = Utils::getWaveGlow(m_isSecondPlayer);
 
     m_glowToggle->toggle(glow.enabled);
-    m_glowGainSlider->setValue(glow.gain / 3.f);
+    m_glowGainSlider->setValue(glow.gain / 2.f);
     m_glowSizeSlider->setValue(glow.size);
 }
 
@@ -134,7 +134,7 @@ void GradientLayer::onGlowSlider(CCObject*) {
 
     float size = glow.size;
 
-    glow.gain = std::clamp(m_glowGainSlider->getValue(), 0.f, 1.f) * 3.f;
+    glow.gain = std::clamp(m_glowGainSlider->getValue(), 0.f, 1.f) * 2.f;
     glow.size = std::clamp(m_glowSizeSlider->getValue(), 0.f, 1.f);
 
     Utils::saveWaveGlow(glow, m_isSecondPlayer);

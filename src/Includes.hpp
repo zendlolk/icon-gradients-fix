@@ -30,28 +30,17 @@ enum class EditorPage {
     Wave = 2
 };
 
-// One layer of the wave trail: drawn at `scale` of the full trail width.
-struct WaveBand {
+// One layer of the wave trail, drawn at `scale` of the trail's width. Layers
+// are drawn widest first, so each one covers the middle of the one before.
+struct WaveLayer {
     float scale;
-    ccColor3B color;
-};
-
-// One step of the glow's falloff: `offset` is the distance from the middle of
-// the trail in trail half-widths, `color` the light added there.
-struct WaveGlowRing {
-    float offset;
-    ccColor3B color;
+    ccColor4B color;
 };
 
 struct WaveGlowSettings {
     bool enabled = false;
-    float gain = 1.f; // 0 to 3
+    float gain = 0.5f; // 0 to 2
     float size = 0.35f; // 0 to 1
-};
-
-struct WaveStyle {
-    std::vector<WaveBand> bands;
-    std::vector<WaveGlowRing> glow;
 };
 
 struct SimplePoint {

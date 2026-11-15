@@ -1,6 +1,8 @@
 #include "Utils.hpp"
 
 #include <algorithm>
+#include <array>
+#include <functional>
 #include <cmath>
 #include <cstring>
 #include "Cache.hpp"
@@ -192,6 +194,10 @@ GradientConfig Utils::getSavedBarConfig() {
 }
 
 void Utils::saveBarConfig(GradientConfig config) {
+    // Bar points only move along the bar; keep older saves on that line too.
+    for (SimplePoint& point : config.points)
+        point.pos.y = 0.5f;
+
     saveConfig(config, "progress-bar", "bar");
 }
 
@@ -285,7 +291,7 @@ WaveGlowSettings Utils::getWaveGlow(bool secondPlayer) {
     const matjson::Value& glow = container["glow"];
 
     settings.enabled = glow["enabled"].asBool().unwrapOr(false);
-    settings.gain = std::clamp(static_cast<float>(glow["gain"].asDouble().unwrapOr(1.0)), 0.f, 3.f);
+    settings.gain = std::clamp(static_cast<float>(glow["gain"].asDouble().unwrapOr(0.5)), 0.f, 2.f);
     settings.size = std::clamp(static_cast<float>(glow["size"].asDouble().unwrapOr(0.35)), 0.f, 1.f);
 
     return settings;
@@ -312,11 +318,27 @@ void Utils::invalidateWaveBands() {
     s_waveStyleDirty[1] = true;
 }
 
-// Turns the points into layers ordered from the full-width outer layer to the
-// thinnest inner one, so drawing them in order paints the trail's
-// cross-section. isLinear means a smooth blend, otherwise each colour is a
-// solid band reaching halfway to its neighbours.
-std::vector<WaveBand> Utils::computeWaveBands(const GradientConfig& config) {
+// How far the glow reaches from the middle of the trail, in trail half-widths
+// (1 is the edge of the trail itself).
+float Utils::getWaveGlowReach(const WaveGlowSettings& settings) {
+    if (!settings.enabled) return 1.f;
+
+    return 1.f + std::max(0.05f, settings.size * 1.2f) * 2.5f;
+}
+
+// Turns the points and glow into the layers the trail is drawn with.
+//
+// The gradient: isLinear means a smooth blend between the points, eased so it
+// flattens out at each point instead of creasing there (the trail is
+// mirrored, so a straight ramp would leave a hard line down the middle).
+// Otherwise each colour is a solid band reaching halfway to its neighbours.
+//
+// The glow works like a soft glow filter: the trail's own colours, blurred
+// and added back. Across a trail that blur only depends on the distance from
+// the middle, so it is worked out here once. Inside the trail the light is
+// added to the colours, which stay opaque so the background never shows
+// through. Outside it becomes a halo that fades out.
+std::vector<WaveLayer> Utils::computeWaveLayers(const GradientConfig& config, const WaveGlowSettings& glow) {
     std::vector<std::pair<float, ccColor3B>> stops;
 
     for (const SimplePoint& point : config.points)
@@ -329,217 +351,180 @@ std::vector<WaveBand> Utils::computeWaveBands(const GradientConfig& config) {
         return a.first < b.first;
     });
 
-    std::vector<WaveBand> bands;
+    std::vector<WaveLayer> layers;
 
-    if (stops.empty()) return bands;
+    if (stops.empty()) return layers;
 
-    if (!config.isLinear) {
-        bands.push_back({ 1.f, stops.back().second });
+    bool smooth = config.isLinear;
 
-        for (int i = static_cast<int>(stops.size()) - 2; i >= 0; i--) {
-            float scale = (stops[i].first + stops[i + 1].first) / 2.f;
+    // Colour of the plain trail at a distance from its middle (0 to 1).
+    auto colorAt = [&stops, smooth](float t) -> std::array<float, 3> {
+        auto toArray = [](const ccColor3B& color) {
+            return std::array<float, 3>{
+                static_cast<float>(color.r),
+                static_cast<float>(color.g),
+                static_cast<float>(color.b)
+            };
+        };
 
-            if (scale < 0.02f || scale >= bands.back().scale) continue;
+        if (t <= stops.front().first) return toArray(stops.front().second);
 
-            bands.push_back({ scale, stops[i].second });
+        for (size_t i = 0; i + 1 < stops.size(); i++) {
+            float a = stops[i].first;
+            float b = stops[i + 1].first;
+
+            if (t > b) continue;
+
+            if (!smooth)
+                return toArray(t <= (a + b) / 2.f ? stops[i].second : stops[i + 1].second);
+
+            float local = b - a > 0.0001f ? (t - a) / (b - a) : 1.f;
+            local = local * local * (3.f - 2.f * local);
+
+            std::array<float, 3> from = toArray(stops[i].second);
+            std::array<float, 3> to = toArray(stops[i + 1].second);
+
+            return {
+                from[0] + (to[0] - from[0]) * local,
+                from[1] + (to[1] - from[1]) * local,
+                from[2] + (to[2] - from[2]) * local
+            };
         }
 
-        return bands;
+        return toArray(stops.back().second);
+    };
+
+    bool hasGlow = glow.enabled && glow.gain > 0.f;
+
+    float sigma = std::max(0.05f, glow.size * 1.2f);
+    float reach = getWaveGlowReach(glow);
+
+    const int samples = 32;
+
+    std::vector<std::array<float, 3>> sampled;
+
+    if (hasGlow)
+        for (int i = 0; i < samples; i++)
+            sampled.push_back(colorAt(std::abs(-1.f + 2.f * (i + 0.5f) / samples)));
+
+    // Light the glow adds at a distance from the middle of the trail.
+    auto lightAt = [&](float distance) -> std::array<float, 3> {
+        std::array<float, 3> light = { 0.f, 0.f, 0.f };
+
+        if (!hasGlow) return light;
+
+        for (int i = 0; i < samples; i++) {
+            float x = -1.f + 2.f * (i + 0.5f) / samples;
+            float weight = std::exp(-(distance - x) * (distance - x) / (2.f * sigma * sigma))
+                / (sigma * 2.5066283f) * (2.f / samples) * glow.gain;
+
+            light[0] += sampled[i][0] * weight;
+            light[1] += sampled[i][1] * weight;
+            light[2] += sampled[i][2] * weight;
+        }
+
+        return light;
+    };
+
+    auto toByte = [](float value) {
+        return static_cast<GLubyte>(std::clamp(value, 0.f, 255.f));
+    };
+
+    // Halo: translucent layers outside the trail, widest first. Layers stack,
+    // so each one only adds what is missing to reach its target opacity.
+    if (hasGlow) {
+        const int haloSteps = 6;
+
+        float covered = 0.f;
+
+        for (int i = haloSteps; i >= 1; i--) {
+            float outer = 1.f + (reach - 1.f) * i / haloSteps;
+            float inner = 1.f + (reach - 1.f) * (i - 1) / haloSteps;
+
+            std::array<float, 3> light = lightAt((outer + inner) / 2.f);
+
+            float strongest = std::max({ light[0], light[1], light[2] });
+            float target = std::clamp(strongest / 255.f, 0.f, 0.85f);
+
+            if (target <= covered + 0.004f || strongest <= 0.f) continue;
+
+            float alpha = 1.f - (1.f - target) / (1.f - covered);
+
+            covered = target;
+
+            layers.push_back({
+                outer,
+                ccc4(
+                    toByte(light[0] / strongest * 255.f),
+                    toByte(light[1] / strongest * 255.f),
+                    toByte(light[2] / strongest * 255.f),
+                    toByte(alpha * 255.f)
+                )
+            });
+        }
     }
 
-    const int steps = 16;
+    // The trail itself: opaque layers from its edge to its middle.
+    std::vector<float> scales;
 
-    for (int i = 0; i < steps; i++) {
-        float scale = 1.f - static_cast<float>(i) / steps;
-        float t = scale - 0.5f / steps;
+    if (smooth)
+        for (int i = 0; i < 20; i++)
+            scales.push_back(1.f - i / 20.f);
+    else {
+        scales.push_back(1.f);
 
-        ccColor3B color = stops.back().second;
+        for (size_t i = 0; i + 1 < stops.size(); i++)
+            scales.push_back((stops[i].first + stops[i + 1].first) / 2.f);
+    }
 
-        if (t <= stops.front().first)
-            color = stops.front().second;
-        else
-            for (size_t j = 0; j + 1 < stops.size(); j++) {
-                float a = stops[j].first;
-                float b = stops[j + 1].first;
+    // The glow's light changes across a solid band too. A smooth blend
+    // already has enough layers to show it.
+    if (hasGlow && !smooth)
+        for (int i = 0; i < 12; i++)
+            scales.push_back(1.f - i / 12.f);
 
-                if (t > b) continue;
+    std::sort(scales.begin(), scales.end(), std::greater<float>());
 
-                float local = b - a > 0.0001f ? (t - a) / (b - a) : 1.f;
+    float previous = 2.f;
 
-                color = ccc3(
-                    static_cast<GLubyte>(stops[j].second.r + (stops[j + 1].second.r - stops[j].second.r) * local),
-                    static_cast<GLubyte>(stops[j].second.g + (stops[j + 1].second.g - stops[j].second.g) * local),
-                    static_cast<GLubyte>(stops[j].second.b + (stops[j + 1].second.b - stops[j].second.b) * local)
-                );
+    for (size_t i = 0; i < scales.size(); i++) {
+        float scale = scales[i];
 
+        if (scale < 0.03f || previous - scale < 0.015f) continue;
+
+        previous = scale;
+
+        // Sample the middle of the part of this layer that stays visible.
+        float next = 0.f;
+
+        for (size_t j = i + 1; j < scales.size(); j++)
+            if (scale - scales[j] >= 0.015f && scales[j] >= 0.03f) {
+                next = scales[j];
                 break;
             }
 
-        bands.push_back({ scale, color });
-    }
+        float distance = (scale + next) / 2.f;
 
-    return bands;
-}
+        std::array<float, 3> color = colorAt(distance);
+        std::array<float, 3> light = lightAt(distance);
 
-// Blur radius of the glow, in trail half-widths.
-float Utils::getWaveGlowSigma(const WaveGlowSettings& settings) {
-    return std::max(0.05f, settings.size * 2.f);
-}
-
-// A soft glow is the image blurred and added back on top. Across a straight
-// trail that blur only depends on the distance from the middle, so it is
-// worked out once here: the trail's cross-section is blurred with a gaussian
-// and sampled at a few distances. Drawing those samples as a mesh with
-// interpolated colours gives the same look as a real blur for almost no cost.
-std::vector<WaveGlowRing> Utils::computeWaveGlow(const std::vector<WaveBand>& bands, const WaveGlowSettings& settings) {
-    std::vector<WaveGlowRing> rings;
-
-    if (!settings.enabled || settings.gain <= 0.f || bands.empty()) return rings;
-
-    float sigma = getWaveGlowSigma(settings);
-    float reach = 1.f + sigma * 2.5f;
-
-    const int ringCount = 8;
-    const int samples = 32;
-
-    for (int i = 0; i < ringCount; i++) {
-        float offset = reach * i / (ringCount - 1);
-        float sum[3] = { 0.f, 0.f, 0.f };
-
-        // The outermost ring is always dark so the glow fades to nothing.
-        for (int j = 0; j < samples && i < ringCount - 1; j++) {
-            float x = -1.f + 2.f * (j + 0.5f) / samples;
-            float distance = std::abs(x);
-
-            // Bands go from widest to thinnest: the last one that still
-            // covers this distance is the one visible there.
-            ccColor3B color = bands.front().color;
-
-            for (const WaveBand& band : bands)
-                if (band.scale >= distance)
-                    color = band.color;
-
-            float weight = std::exp(-(offset - x) * (offset - x) / (2.f * sigma * sigma))
-                / (sigma * 2.5066283f) * (2.f / samples);
-
-            sum[0] += color.r * weight;
-            sum[1] += color.g * weight;
-            sum[2] += color.b * weight;
-        }
-
-        rings.push_back({
-            offset,
-            ccc3(
-                static_cast<GLubyte>(std::min(255.f, sum[0] * settings.gain)),
-                static_cast<GLubyte>(std::min(255.f, sum[1] * settings.gain)),
-                static_cast<GLubyte>(std::min(255.f, sum[2] * settings.gain))
+        layers.push_back({
+            scale,
+            ccc4(
+                toByte(color[0] + light[0]),
+                toByte(color[1] + light[1]),
+                toByte(color[2] + light[2]),
+                255
             )
         });
     }
 
-    return rings;
+    return layers;
 }
 
-// Builds the glow for a trail running through `points` as triangles: strips
-// that follow the trail, one per gap between rings on each side, with mitred
-// corners so strips of neighbouring segments meet instead of overlapping
-// (overlaps would show up as bright spots). Both ends fade out lengthwise.
-void Utils::buildWaveGlowMesh(const std::vector<CCPoint>& trail, float halfWidth, const std::vector<WaveGlowRing>& rings, float opacity, std::vector<ccV2F_C4B_T2F>& out) {
-    if (trail.size() < 2 || rings.size() < 2 || halfWidth <= 0.f || opacity <= 0.f) return;
-
-    float reach = rings.back().offset * halfWidth;
-
-    std::vector<CCPoint> points;
-    std::vector<CCPoint> normals;
-    std::vector<float> fades;
-
-    auto direction = [](const CCPoint& from, const CCPoint& to) {
-        CCPoint delta = to - from;
-        float length = std::sqrt(delta.x * delta.x + delta.y * delta.y);
-
-        return length > 0.0001f ? CCPoint{ delta.x / length, delta.y / length } : CCPoint{ 1.f, 0.f };
-    };
-
-    CCPoint firstDir = direction(trail[0], trail[1]);
-    CCPoint lastDir = direction(trail[trail.size() - 2], trail.back());
-
-    points.push_back(trail.front() - firstDir * reach);
-    normals.push_back({ -firstDir.y, firstDir.x });
-    fades.push_back(0.f);
-
-    for (size_t i = 0; i < trail.size(); i++) {
-        CCPoint before = i == 0 ? firstDir : direction(trail[i - 1], trail[i]);
-        CCPoint after = i + 1 == trail.size() ? lastDir : direction(trail[i], trail[i + 1]);
-
-        CCPoint normalBefore = { -before.y, before.x };
-        CCPoint normalAfter = { -after.y, after.x };
-
-        CCPoint miter = normalBefore + normalAfter;
-        float length = std::sqrt(miter.x * miter.x + miter.y * miter.y);
-
-        if (length < 0.0001f)
-            miter = normalBefore;
-        else {
-            miter = ccp(miter.x / length, miter.y / length);
-
-            // Stretch so the strip keeps its width through the corner, but
-            // not without limit on very sharp turns.
-            float cosine = std::max(0.34f, miter.x * normalBefore.x + miter.y * normalBefore.y);
-
-            miter = ccp(miter.x / cosine, miter.y / cosine);
-        }
-
-        points.push_back(trail[i]);
-        normals.push_back(miter);
-        fades.push_back(1.f);
-    }
-
-    points.push_back(trail.back() + lastDir * reach);
-    normals.push_back({ -lastDir.y, lastDir.x });
-    fades.push_back(0.f);
-
-    auto vertex = [&](size_t point, size_t ring, float side) {
-        CCPoint pos = points[point] + normals[point] * (rings[ring].offset * halfWidth * side);
-        float strength = fades[point] * opacity;
-
-        ccV2F_C4B_T2F ret;
-
-        ret.vertices = { pos.x, pos.y };
-        ret.texCoords = { 0.f, 0.f };
-        ret.colors = ccc4(
-            static_cast<GLubyte>(rings[ring].color.r * strength),
-            static_cast<GLubyte>(rings[ring].color.g * strength),
-            static_cast<GLubyte>(rings[ring].color.b * strength),
-            255
-        );
-
-        return ret;
-    };
-
-    out.reserve(out.size() + (points.size() - 1) * (rings.size() - 1) * 12);
-
-    for (size_t i = 0; i + 1 < points.size(); i++)
-        for (size_t ring = 0; ring + 1 < rings.size(); ring++)
-            for (float side : { 1.f, -1.f }) {
-                ccV2F_C4B_T2F a = vertex(i, ring, side);
-                ccV2F_C4B_T2F b = vertex(i, ring + 1, side);
-                ccV2F_C4B_T2F c = vertex(i + 1, ring + 1, side);
-                ccV2F_C4B_T2F d = vertex(i + 1, ring, side);
-
-                out.push_back(a);
-                out.push_back(b);
-                out.push_back(c);
-
-                out.push_back(a);
-                out.push_back(c);
-                out.push_back(d);
-            }
-}
-
-// Bands and glow for the in-game trail. Empty bands mean the vanilla trail is
-// left alone.
-const WaveStyle& Utils::getWaveStyle(bool secondPlayer) {
-    static WaveStyle styles[2];
+// Layers for the in-game trail. Empty means the vanilla trail is left alone.
+const std::vector<WaveLayer>& Utils::getWaveLayers(bool secondPlayer) {
+    static std::vector<WaveLayer> layers[2];
 
     int index = secondPlayer ? 1 : 0;
 
@@ -547,18 +532,19 @@ const WaveStyle& Utils::getWaveStyle(bool secondPlayer) {
         s_waveStyleDirty[index] = false;
 
         GradientConfig config = getSavedWaveConfig(secondPlayer);
-        std::vector<WaveBand> bands = computeWaveBands(config);
+        WaveGlowSettings glow = getWaveGlow(secondPlayer);
 
         bool usesPlayerColor = config.isEmpty(
             ColorType::Main,
             secondPlayer && isSettingEnabled(P2_SEPARATE)
         );
 
-        styles[index].glow = computeWaveGlow(bands, getWaveGlow(secondPlayer));
-        styles[index].bands = usesPlayerColor ? std::vector<WaveBand>{} : bands;
+        layers[index] = usesPlayerColor && !glow.enabled
+            ? std::vector<WaveLayer>{}
+            : computeWaveLayers(config, glow);
     }
 
-    return styles[index];
+    return layers[index];
 }
 
 // rectInPixels, when given, is the texture area the gradient spans. The

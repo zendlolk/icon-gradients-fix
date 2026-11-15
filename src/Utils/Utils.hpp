@@ -33,13 +33,11 @@ public:
     static void saveWaveConfig(GradientConfig, bool);
     static WaveGlowSettings getWaveGlow(bool);
     static void saveWaveGlow(WaveGlowSettings, bool);
-    static float getWaveGlowSigma(const WaveGlowSettings&);
-    static std::vector<WaveBand> computeWaveBands(const GradientConfig&);
-    static std::vector<WaveGlowRing> computeWaveGlow(const std::vector<WaveBand>&, const WaveGlowSettings&);
-    static const WaveStyle& getWaveStyle(bool);
+    static float getWaveGlowReach(const WaveGlowSettings&);
+    static std::vector<WaveLayer> computeWaveLayers(const GradientConfig&, const WaveGlowSettings&);
+    static const std::vector<WaveLayer>& getWaveLayers(bool);
     static void invalidateWaveBands();
 
-    static void buildWaveGlowMesh(const std::vector<CCPoint>&, float, const std::vector<WaveGlowRing>&, float, std::vector<ccV2F_C4B_T2F>&);
     static void setDrawNodeVertices(CCDrawNode*, const std::vector<ccV2F_C4B_T2F>&);
     static matjson::Value getSaveObject(GradientConfig);
 
