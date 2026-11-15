@@ -549,15 +549,16 @@ std::vector<WaveNode> Utils::computeWaveProfile(const GradientConfig& config, co
     return profile;
 }
 
-// Adds one straight piece of trail from `start` to `end` as triangles.
-// `startSide` and `endSide` point from the middle of the trail to its edge at
-// each end; they are separate so pieces can meet at an angle.
-void Utils::appendWaveSegment(const std::vector<WaveNode>& profile, const CCPoint& start, const CCPoint& end, const CCPoint& startSide, const CCPoint& endSide, float opacity, std::vector<ccV2F_C4B_T2F>& out) {
-    auto vertex = [&](const CCPoint& origin, const CCPoint& side, const WaveNode& node) {
+// Adds one straight piece of trail between two ends as triangles.
+void Utils::appendWaveSegment(const std::vector<WaveNode>& profile, const WaveEnd& start, const WaveEnd& end, float opacity, std::vector<ccV2F_C4B_T2F>& out) {
+    auto vertex = [&](const WaveEnd& at, const WaveNode& node) {
+        const CCPoint& side = node.offset >= 0.f ? at.positive : at.negative;
+        float distance = std::abs(node.offset);
+
         ccV2F_C4B_T2F ret;
 
-        ret.vertices.x = origin.x + side.x * node.offset;
-        ret.vertices.y = origin.y + side.y * node.offset;
+        ret.vertices.x = at.point.x + side.x * distance;
+        ret.vertices.y = at.point.y + side.y * distance;
         ret.texCoords.u = 0.f;
         ret.texCoords.v = 0.f;
         ret.colors = node.color;
@@ -573,10 +574,10 @@ void Utils::appendWaveSegment(const std::vector<WaveNode>& profile, const CCPoin
         // Fully transparent strips draw nothing.
         if (a.color.a == 0 && b.color.a == 0) continue;
 
-        ccV2F_C4B_T2F startA = vertex(start, startSide, a);
-        ccV2F_C4B_T2F startB = vertex(start, startSide, b);
-        ccV2F_C4B_T2F endA = vertex(end, endSide, a);
-        ccV2F_C4B_T2F endB = vertex(end, endSide, b);
+        ccV2F_C4B_T2F startA = vertex(start, a);
+        ccV2F_C4B_T2F startB = vertex(start, b);
+        ccV2F_C4B_T2F endA = vertex(end, a);
+        ccV2F_C4B_T2F endB = vertex(end, b);
 
         out.push_back(startA);
         out.push_back(startB);
@@ -1314,7 +1315,7 @@ void Utils::applyGradient(CCSprite* sprite, GradientConfig config, IconType icon
 
 // Sets the uniforms every glow shares. Expects the glow shader to be the
 // sprite's program already.
-static CCGLProgram* setGlowUniforms(CCSprite* glow, const GlowSettings& settings, float inner) {
+static CCGLProgram* setGlowUniforms(CCSprite* glow, const GlowSettings& settings, float innerBase, float innerPerSize) {
     CCGLProgram* program = glow->getShaderProgram();
 
     if (!program) return nullptr;
@@ -1352,7 +1353,12 @@ static CCGLProgram* setGlowUniforms(CCSprite* glow, const GlowSettings& settings
 
     glUniform3fv(glGetUniformLocation(id, "u_taps"), 36, taps.data());
     glUniform1f(glGetUniformLocation(id, "u_gain"), settings.gain * 1.6f);
-    glUniform1f(glGetUniformLocation(id, "u_inner"), inner);
+    // Light added on top of the sprite itself. It has a ceiling, so a high
+    // gain strengthens the glow around the sprite without washing the sprite
+    // out. A bigger glow is allowed a little more.
+    float innerLimit = innerBase + innerPerSize * settings.size;
+
+    glUniform1f(glGetUniformLocation(id, "u_inner"), innerLimit * (1.f - std::exp(-settings.gain * 0.6f)));
 
     return program;
 }
@@ -1432,7 +1438,7 @@ CCSprite* Utils::updateSpriteGlow(CCSprite* real, GradientConfig config, IconTyp
 
     applyGradient(glow, config, iconType, ColorType::Main, id, false, secondPlayer, playerObject, extra, false, &frameRect, true, frame->isRotated());
 
-    CCGLProgram* program = setGlowUniforms(glow, settings, 0.35f);
+    CCGLProgram* program = setGlowUniforms(glow, settings, 0.12f, 0.2f);
 
     if (!program) {
         glow->setVisible(false);
@@ -1509,7 +1515,7 @@ CCSprite* Utils::updateBarGlow(CCSprite* fill, const CCRect& fullRect, GradientC
     applyGradient(glow, config, static_cast<IconType>(-2), ColorType::Main, 801, false, false, inGame, 66, false, &fullRectPixels, true, false);
 
     // Mostly outwards: very little of it shows on the bar itself.
-    CCGLProgram* program = setGlowUniforms(glow, settings, 0.12f);
+    CCGLProgram* program = setGlowUniforms(glow, settings, 0.04f, 0.08f);
 
     if (!program) {
         glow->setVisible(false);

@@ -437,12 +437,13 @@ void PointsLayer::updateGradient(GradientConfig config, ColorType colorType, boo
         // The same cross-section the game draws, on a straight trail.
         std::vector<ccV2F_C4B_T2F> vertices;
 
+        CCPoint up = ccp(0.f, size.height / 2.f);
+        CCPoint down = ccp(0.f, -size.height / 2.f);
+
         Utils::appendWaveSegment(
             Utils::computeWaveProfile(config, Utils::getWaveGlow(secondPlayer)),
-            { 0.f, size.height / 2.f },
-            { size.width, size.height / 2.f },
-            { 0.f, size.height / 2.f },
-            { 0.f, size.height / 2.f },
+            WaveEnd{ ccp(0.f, size.height / 2.f), up, down },
+            WaveEnd{ ccp(size.width, size.height / 2.f), up, down },
             1.f,
             vertices
         );

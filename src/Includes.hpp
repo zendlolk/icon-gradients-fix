@@ -45,6 +45,15 @@ enum class GlowTarget {
     Wave = 2
 };
 
+// One end of a straight piece of wave trail: where its centre line ends, and
+// the directions from there to the trail's edge on either side. They are
+// separate because at a corner the two sides are cut at different angles.
+struct WaveEnd {
+    CCPoint point;
+    CCPoint positive;
+    CCPoint negative;
+};
+
 struct GlowSettings {
     bool enabled = false;
     float gain = 0.5f; // 0 to 2

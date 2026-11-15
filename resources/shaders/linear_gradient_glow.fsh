@@ -30,7 +30,7 @@ uniform vec3 u_taps[36];
 uniform vec2 u_radius;
 
 uniform float u_gain;
-// How much of the glow shows on top of the sprite itself (0 = only around it).
+// How much light the glow adds on top of the sprite itself.
 uniform float u_inner;
 
 // 0: blur the texture. 1: the shape is a bar filled up to u_fill, which can
@@ -79,6 +79,7 @@ void main() {
 
     float shape = 0.0;
     float blurred = 0.0;
+    float lit = 1.0;
 
     if (u_mode == 1) {
         vec2 pos = uv * u_barSize;
@@ -91,15 +92,24 @@ void main() {
     } else {
         shape = alphaAt(v_texCoord);
 
+        // How bright the sprite is here, so its dark outlines stay dark.
+        lit = dot(texture2D(u_texture, v_texCoord).rgb, vec3(0.299, 0.587, 0.114));
+
         for (int i = 0; i < 36; ++i)
             blurred += alphaAt(v_texCoord + u_taps[i].xy * u_radius) * u_taps[i].z;
 
         uv = clamp(uv, vec2(0.0), vec2(1.0));
     }
 
-    float amount = clamp(blurred * u_gain, 0.0, 1.0) * mix(1.0, u_inner, shape);
+    // Around the sprite: the blurred shape, levelling off smoothly instead of
+    // hitting a hard ceiling when the gain is high.
+    float outer = (1.0 - exp(-blurred * u_gain * 1.5)) * (1.0 - shape);
+
+    // On the sprite: an even lift in brightness. It does not follow the blur,
+    // which would show up as shapes inside the sprite.
+    float inner = u_inner * lit * shape;
 
     // Premultiplied: around the sprite this blends over the background, on
     // top of the sprite it only adds light.
-    gl_FragColor = vec4(gradientColor(uv).rgb * amount, amount * (1.0 - shape) * 0.85) * v_fragmentColor.a;
+    gl_FragColor = vec4(gradientColor(uv).rgb * (outer + inner), outer * 0.85) * v_fragmentColor.a;
 }

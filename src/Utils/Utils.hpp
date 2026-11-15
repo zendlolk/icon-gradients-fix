@@ -45,7 +45,7 @@ public:
     static std::vector<WaveNode> computeWaveProfile(const GradientConfig&, const GlowSettings&);
     static const std::vector<WaveNode>& getWaveProfile(bool);
     static void appendWaveFan(const std::vector<WaveNode>&, const CCPoint&, const CCPoint&, const CCPoint&, float, std::vector<ccV2F_C4B_T2F>&);
-    static void appendWaveSegment(const std::vector<WaveNode>&, const CCPoint&, const CCPoint&, const CCPoint&, const CCPoint&, float, std::vector<ccV2F_C4B_T2F>&);
+    static void appendWaveSegment(const std::vector<WaveNode>&, const WaveEnd&, const WaveEnd&, float, std::vector<ccV2F_C4B_T2F>&);
     static void invalidateWaveBands();
 
     static void setDrawNodeVertices(CCDrawNode*, const std::vector<ccV2F_C4B_T2F>&);

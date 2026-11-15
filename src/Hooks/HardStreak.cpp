@@ -10,17 +10,16 @@ struct TrailPiece {
     CCPoint endSide;
 };
 
-// While set, quads the given node asks to draw are recorded here instead of
-// being drawn. Only ever set for the duration of a captureStroke call.
-// One end of a piece: where it is, where the piece's other end is, the
-// direction across the trail there, and whether another piece starts here.
+// One end of a piece, the piece's other end, and whether another piece
+// meets it there.
 struct TrailEnd {
-    CCPoint point;
+    WaveEnd end;
     CCPoint opposite;
-    CCPoint side;
     bool joined;
 };
 
+// While set, quads the given node asks to draw are recorded here instead of
+// being drawn. Only ever set for the duration of a captureStroke call.
 static CCDrawNode* s_captureNode = nullptr;
 static std::vector<std::array<CCPoint, 4>>* s_captured = nullptr;
 
@@ -172,54 +171,126 @@ void ProHardStreak::updateStroke(float dt) {
     float opacity = getOpacity() / 255.f;
 
     if (opacity > 0.f) {
-        for (const TrailPiece& piece : pieces)
-            Utils::appendWaveSegment(profile, piece.start, piece.end, piece.startSide, piece.endSide, opacity, vertices);
-
-        // The pieces are straight-ended, so where two meet at an angle the
-        // outside of the corner is left empty. Fill it with a rounded join.
-        // Ends that meet nothing get rounded off instead.
-        //
-        // Pieces are matched by position rather than by order, since nothing
-        // says which way round the game hands them over.
+        // Both ends of every piece, as the game laid them out: cut straight
+        // across the trail.
         ends.clear();
 
         for (const TrailPiece& piece : pieces) {
-            ends.push_back({ piece.end, piece.start, piece.endSide, false });
-            ends.push_back({ piece.start, piece.end, piece.startSide, false });
+            ends.push_back({ { piece.start, piece.startSide, piece.startSide * -1.f }, piece.end, false });
+            ends.push_back({ { piece.end, piece.endSide, piece.endSide * -1.f }, piece.start, false });
         }
 
+        // The game makes its pieces overlap at corners, which is fine for a
+        // solid trail but doubles up a glow. So find where two pieces meet
+        // and make them end exactly at the corner instead:
+        //  - on the inside of the corner both are cut along the same slanted
+        //    line, so they meet without overlapping;
+        //  - on the outside both are cut straight, and the gap that leaves is
+        //    filled with a rounded join.
+        //
+        // Pieces are matched by position rather than by order, since nothing
+        // says which way round the game hands them over.
         for (size_t i = 0; i < ends.size(); i++) {
-            TrailEnd& end = ends[i];
+            TrailEnd& a = ends[i];
 
-            if (end.joined) continue;
+            if (a.joined) continue;
+
+            float widthA = ccpLength(a.end.positive);
+
+            // The nearest other end within reach is the one it meets. Taking
+            // the nearest matters when pieces are short and several are close.
+            size_t nearest = ends.size();
+            float nearestDistance = 0.f;
 
             for (size_t j = i + 1; j < ends.size(); j++) {
-                TrailEnd& other = ends[j];
+                const TrailEnd& other = ends[j];
 
-                if (other.joined || ccpDistance(end.point, other.point) > 0.05f) continue;
+                // Two ends of the same piece sit next to each other in the list.
+                if (other.joined || (j == i + 1 && i % 2 == 0)) continue;
 
-                end.joined = true;
-                other.joined = true;
+                float distance = ccpDistance(a.end.point, other.end.point);
 
-                // Points into the corner; the gap is on the other side.
-                CCPoint inward = unit(end.opposite - end.point) + unit(other.opposite - other.point);
+                if (distance > std::max(widthA, ccpLength(other.end.positive)) * 2.5f) continue;
 
-                if (ccpLength(inward) > 0.02f) {
-                    CCPoint from = ccpDot(end.side, inward) < 0.f ? end.side : end.side * -1.f;
-                    CCPoint to = ccpDot(other.side, inward) < 0.f ? other.side : other.side * -1.f;
-
-                    Utils::appendWaveFan(profile, end.point, from, to, opacity, vertices);
+                if (nearest == ends.size() || distance < nearestDistance) {
+                    nearest = j;
+                    nearestDistance = distance;
                 }
+            }
+
+            if (nearest == ends.size()) continue;
+
+            // A loop only so the cases below can leave early.
+            for (;;) {
+                TrailEnd& b = ends[nearest];
+
+                float reach = std::max(widthA, ccpLength(b.end.positive)) * 2.5f;
+
+                CCPoint towardA = unit(a.opposite - a.end.point);
+                CCPoint towardB = unit(b.opposite - b.end.point);
+
+                // The corner is where the two centre lines cross. If they are
+                // close to parallel there is no corner to speak of.
+                float cross = towardA.x * towardB.y - towardA.y * towardB.x;
+
+                CCPoint corner = midpoint(a.end.point, b.end.point);
+
+                if (std::abs(cross) > 0.05f) {
+                    CCPoint between = b.end.point - a.end.point;
+                    float along = (between.x * towardB.y - between.y * towardB.x) / cross;
+
+                    CCPoint crossing = a.end.point + towardA * along;
+
+                    if (ccpDistance(crossing, corner) <= reach)
+                        corner = crossing;
+                }
+
+                a.joined = true;
+                b.joined = true;
+
+                a.end.point = corner;
+                b.end.point = corner;
+
+                // Points into the corner, between the two pieces.
+                CCPoint inward = towardA + towardB;
+                float inwardLength = ccpLength(inward);
+
+                if (inwardLength < 0.02f || std::abs(cross) <= 0.05f) break;
+
+                inward = inward * (1.f / inwardLength);
+
+                // How far along that line a point has to go to be a given
+                // distance from either piece's centre line. Limited, so a
+                // very sharp corner does not shoot off into the distance.
+                float slant = 1.f / std::max(0.34f, std::sqrt(std::max(0.f, 1.f - inwardLength * inwardLength / 4.f)));
+
+                for (TrailEnd* end : { &a, &b }) {
+                    float width = ccpLength(end->end.positive);
+                    bool positiveIsInside = ccpDot(end->end.positive, inward) > 0.f;
+
+                    (positiveIsInside ? end->end.positive : end->end.negative) = inward * (width * slant);
+                }
+
+                CCPoint outsideA = ccpDot(a.end.positive, inward) > 0.f ? a.end.negative : a.end.positive;
+                CCPoint outsideB = ccpDot(b.end.positive, inward) > 0.f ? b.end.negative : b.end.positive;
+
+                Utils::appendWaveFan(profile, corner, outsideA, outsideB, opacity, vertices);
 
                 break;
             }
+        }
 
+        for (size_t i = 0; i + 1 < ends.size(); i += 2)
+            Utils::appendWaveSegment(profile, ends[i].end, ends[i + 1].end, opacity, vertices);
+
+        // Ends that meet nothing are rounded off.
+        for (const TrailEnd& end : ends) {
             if (end.joined) continue;
 
-            CCPoint outward = unit(end.point - end.opposite) * ccpLength(end.side);
+            CCPoint outward = unit(end.end.point - end.opposite) * ccpLength(end.end.positive);
 
-            Utils::appendWaveFan(profile, end.point, end.side, outward, opacity, vertices);
-            Utils::appendWaveFan(profile, end.point, outward, end.side * -1.f, opacity, vertices);
+            Utils::appendWaveFan(profile, end.end.point, end.end.positive, outward, opacity, vertices);
+            Utils::appendWaveFan(profile, end.end.point, outward, end.end.negative, opacity, vertices);
         }
     }
 
