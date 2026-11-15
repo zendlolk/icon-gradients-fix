@@ -30,17 +30,18 @@ enum class EditorPage {
     Wave = 2
 };
 
-// One layer of the wave trail, drawn at `scale` of the trail's width. Layers
-// are drawn widest first, so each one covers the middle of the one before.
-struct WaveLayer {
-    float scale;
+// One point of the wave trail's cross-section: the colour at `offset` from the
+// middle of the trail, in trail half-widths (so 1 and -1 are its edges, and
+// anything beyond is glow). Colours are interpolated between points.
+struct WaveNode {
+    float offset;
     ccColor4B color;
 };
 
 struct WaveGlowSettings {
     bool enabled = false;
     float gain = 0.5f; // 0 to 2
-    float size = 0.35f; // 0 to 1
+    float size = 0.5f; // 0 to 1
 };
 
 struct SimplePoint {

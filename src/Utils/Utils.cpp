@@ -292,7 +292,7 @@ WaveGlowSettings Utils::getWaveGlow(bool secondPlayer) {
 
     settings.enabled = glow["enabled"].asBool().unwrapOr(false);
     settings.gain = std::clamp(static_cast<float>(glow["gain"].asDouble().unwrapOr(0.5)), 0.f, 2.f);
-    settings.size = std::clamp(static_cast<float>(glow["size"].asDouble().unwrapOr(0.35)), 0.f, 1.f);
+    settings.size = std::clamp(static_cast<float>(glow["size"].asDouble().unwrapOr(0.5)), 0.f, 1.f);
 
     return settings;
 }
@@ -323,10 +323,12 @@ void Utils::invalidateWaveBands() {
 float Utils::getWaveGlowReach(const WaveGlowSettings& settings) {
     if (!settings.enabled) return 1.f;
 
-    return 1.f + std::max(0.05f, settings.size * 1.2f) * 2.5f;
+    return 1.f + std::max(0.05f, settings.size * 2.5f) * 2.5f;
 }
 
-// Turns the points and glow into the layers the trail is drawn with.
+// Works out the trail's cross-section: which colour sits at which distance
+// from the middle. The trail is then drawn as strips between these points
+// with the colours interpolated, so blends and the glow are truly smooth.
 //
 // The gradient: isLinear means a smooth blend between the points, eased so it
 // flattens out at each point instead of creasing there (the trail is
@@ -335,10 +337,11 @@ float Utils::getWaveGlowReach(const WaveGlowSettings& settings) {
 //
 // The glow works like a soft glow filter: the trail's own colours, blurred
 // and added back. Across a trail that blur only depends on the distance from
-// the middle, so it is worked out here once. Inside the trail the light is
-// added to the colours, which stay opaque so the background never shows
-// through. Outside it becomes a halo that fades out.
-std::vector<WaveLayer> Utils::computeWaveLayers(const GradientConfig& config, const WaveGlowSettings& glow) {
+// the middle, so it is worked out here once instead of blurring anything
+// while playing. Inside the trail the light is added to the colours, which
+// stay opaque so the background never shows through. Outside it becomes a
+// halo that fades out.
+std::vector<WaveNode> Utils::computeWaveProfile(const GradientConfig& config, const WaveGlowSettings& glow) {
     std::vector<std::pair<float, ccColor3B>> stops;
 
     for (const SimplePoint& point : config.points)
@@ -351,22 +354,22 @@ std::vector<WaveLayer> Utils::computeWaveLayers(const GradientConfig& config, co
         return a.first < b.first;
     });
 
-    std::vector<WaveLayer> layers;
+    std::vector<WaveNode> profile;
 
-    if (stops.empty()) return layers;
+    if (stops.empty()) return profile;
 
     bool smooth = config.isLinear;
 
-    // Colour of the plain trail at a distance from its middle (0 to 1).
-    auto colorAt = [&stops, smooth](float t) -> std::array<float, 3> {
-        auto toArray = [](const ccColor3B& color) {
-            return std::array<float, 3>{
-                static_cast<float>(color.r),
-                static_cast<float>(color.g),
-                static_cast<float>(color.b)
-            };
+    auto toArray = [](const ccColor3B& color) {
+        return std::array<float, 3>{
+            static_cast<float>(color.r),
+            static_cast<float>(color.g),
+            static_cast<float>(color.b)
         };
+    };
 
+    // Colour of the plain trail at a distance from its middle (0 to 1).
+    auto colorAt = [&](float t) -> std::array<float, 3> {
         if (t <= stops.front().first) return toArray(stops.front().second);
 
         for (size_t i = 0; i + 1 < stops.size(); i++) {
@@ -384,7 +387,7 @@ std::vector<WaveLayer> Utils::computeWaveLayers(const GradientConfig& config, co
             std::array<float, 3> from = toArray(stops[i].second);
             std::array<float, 3> to = toArray(stops[i + 1].second);
 
-            return {
+            return std::array<float, 3>{
                 from[0] + (to[0] - from[0]) * local,
                 from[1] + (to[1] - from[1]) * local,
                 from[2] + (to[2] - from[2]) * local
@@ -396,7 +399,7 @@ std::vector<WaveLayer> Utils::computeWaveLayers(const GradientConfig& config, co
 
     bool hasGlow = glow.enabled && glow.gain > 0.f;
 
-    float sigma = std::max(0.05f, glow.size * 1.2f);
+    float sigma = std::max(0.05f, glow.size * 2.5f);
     float reach = getWaveGlowReach(glow);
 
     const int samples = 32;
@@ -430,30 +433,73 @@ std::vector<WaveLayer> Utils::computeWaveLayers(const GradientConfig& config, co
         return static_cast<GLubyte>(std::clamp(value, 0.f, 255.f));
     };
 
-    // Halo: translucent layers outside the trail, widest first. Layers stack,
-    // so each one only adds what is missing to reach its target opacity.
-    if (hasGlow) {
-        const int haloSteps = 6;
+    // One half of the cross-section, from the middle outwards.
+    std::vector<WaveNode> half;
 
-        float covered = 0.f;
+    // The trail itself, opaque.
+    std::vector<float> offsets = { 0.f, 1.f };
 
-        for (int i = haloSteps; i >= 1; i--) {
-            float outer = 1.f + (reach - 1.f) * i / haloSteps;
-            float inner = 1.f + (reach - 1.f) * (i - 1) / haloSteps;
+    for (int i = 1; i < 12; i++)
+        offsets.push_back(i / 12.f);
 
-            std::array<float, 3> light = lightAt((outer + inner) / 2.f);
+    // Solid bands change colour over a short ramp rather than a hard line,
+    // which also keeps their edges from looking jagged.
+    if (!smooth)
+        for (size_t i = 0; i + 1 < stops.size(); i++) {
+            float edge = (stops[i].first + stops[i + 1].first) / 2.f;
 
-            float strongest = std::max({ light[0], light[1], light[2] });
-            float target = std::clamp(strongest / 255.f, 0.f, 0.85f);
+            offsets.push_back(std::clamp(edge - 0.02f, 0.f, 1.f));
+            offsets.push_back(std::clamp(edge + 0.02f, 0.f, 1.f));
+        }
 
-            if (target <= covered + 0.004f || strongest <= 0.f) continue;
+    std::sort(offsets.begin(), offsets.end());
 
-            float alpha = 1.f - (1.f - target) / (1.f - covered);
+    for (float offset : offsets) {
+        if (!half.empty() && offset - half.back().offset < 0.004f) continue;
 
-            covered = target;
+        std::array<float, 3> color = colorAt(offset);
+        std::array<float, 3> light = lightAt(offset);
 
-            layers.push_back({
-                outer,
+        half.push_back({
+            offset,
+            ccc4(
+                toByte(color[0] + light[0]),
+                toByte(color[1] + light[1]),
+                toByte(color[2] + light[2]),
+                255
+            )
+        });
+    }
+
+    // Past the edge: a short ramp so the edge is not jagged, into either
+    // nothing or the halo.
+    const float edgeRamp = 0.08f;
+
+    ccColor4B edge = half.back().color;
+
+    if (!hasGlow)
+        half.push_back({ 1.f + edgeRamp, ccc4(edge.r, edge.g, edge.b, 0) });
+    else {
+        const int haloSteps = 10;
+
+        for (int i = 0; i <= haloSteps; i++) {
+            // Closer together near the trail, where the halo changes fastest.
+            float progress = static_cast<float>(i) / haloSteps;
+            float offset = 1.f + edgeRamp + (reach - 1.f - edgeRamp) * progress * progress;
+
+            std::array<float, 3> light = lightAt(offset);
+
+            float strongest = std::max({ light[0], light[1], light[2], 1.f });
+            // A wider blur spreads the same light thinner; make up for it so a
+            // bigger glow stays visible instead of fading away.
+            float alpha = i == haloSteps ? 0.f : std::clamp(strongest / 255.f * (1.f + sigma) * 0.8f, 0.f, 0.85f);
+
+            // Fade the last stretch so the halo has no visible outer edge.
+            if (progress > 0.6f)
+                alpha *= (1.f - progress) / 0.4f;
+
+            half.push_back({
+                offset,
                 ccc4(
                     toByte(light[0] / strongest * 255.f),
                     toByte(light[1] / strongest * 255.f),
@@ -464,67 +510,59 @@ std::vector<WaveLayer> Utils::computeWaveLayers(const GradientConfig& config, co
         }
     }
 
-    // The trail itself: opaque layers from its edge to its middle.
-    std::vector<float> scales;
+    // Mirror it into the full cross-section, from one side to the other.
+    for (size_t i = half.size(); i-- > 1;)
+        profile.push_back({ -half[i].offset, half[i].color });
 
-    if (smooth)
-        for (int i = 0; i < 20; i++)
-            scales.push_back(1.f - i / 20.f);
-    else {
-        scales.push_back(1.f);
+    for (const WaveNode& node : half)
+        profile.push_back(node);
 
-        for (size_t i = 0; i + 1 < stops.size(); i++)
-            scales.push_back((stops[i].first + stops[i + 1].first) / 2.f);
-    }
-
-    // The glow's light changes across a solid band too. A smooth blend
-    // already has enough layers to show it.
-    if (hasGlow && !smooth)
-        for (int i = 0; i < 12; i++)
-            scales.push_back(1.f - i / 12.f);
-
-    std::sort(scales.begin(), scales.end(), std::greater<float>());
-
-    float previous = 2.f;
-
-    for (size_t i = 0; i < scales.size(); i++) {
-        float scale = scales[i];
-
-        if (scale < 0.03f || previous - scale < 0.015f) continue;
-
-        previous = scale;
-
-        // Sample the middle of the part of this layer that stays visible.
-        float next = 0.f;
-
-        for (size_t j = i + 1; j < scales.size(); j++)
-            if (scale - scales[j] >= 0.015f && scales[j] >= 0.03f) {
-                next = scales[j];
-                break;
-            }
-
-        float distance = (scale + next) / 2.f;
-
-        std::array<float, 3> color = colorAt(distance);
-        std::array<float, 3> light = lightAt(distance);
-
-        layers.push_back({
-            scale,
-            ccc4(
-                toByte(color[0] + light[0]),
-                toByte(color[1] + light[1]),
-                toByte(color[2] + light[2]),
-                255
-            )
-        });
-    }
-
-    return layers;
+    return profile;
 }
 
-// Layers for the in-game trail. Empty means the vanilla trail is left alone.
-const std::vector<WaveLayer>& Utils::getWaveLayers(bool secondPlayer) {
-    static std::vector<WaveLayer> layers[2];
+// Adds one straight piece of trail from `start` to `end` as triangles.
+// `startSide` and `endSide` point from the middle of the trail to its edge at
+// each end; they are separate so pieces can meet at an angle.
+void Utils::appendWaveSegment(const std::vector<WaveNode>& profile, const CCPoint& start, const CCPoint& end, const CCPoint& startSide, const CCPoint& endSide, float opacity, std::vector<ccV2F_C4B_T2F>& out) {
+    auto vertex = [&](const CCPoint& origin, const CCPoint& side, const WaveNode& node) {
+        ccV2F_C4B_T2F ret;
+
+        ret.vertices.x = origin.x + side.x * node.offset;
+        ret.vertices.y = origin.y + side.y * node.offset;
+        ret.texCoords.u = 0.f;
+        ret.texCoords.v = 0.f;
+        ret.colors = node.color;
+        ret.colors.a = static_cast<GLubyte>(node.color.a * opacity);
+
+        return ret;
+    };
+
+    for (size_t i = 0; i + 1 < profile.size(); i++) {
+        const WaveNode& a = profile[i];
+        const WaveNode& b = profile[i + 1];
+
+        // Fully transparent strips draw nothing.
+        if (a.color.a == 0 && b.color.a == 0) continue;
+
+        ccV2F_C4B_T2F startA = vertex(start, startSide, a);
+        ccV2F_C4B_T2F startB = vertex(start, startSide, b);
+        ccV2F_C4B_T2F endA = vertex(end, endSide, a);
+        ccV2F_C4B_T2F endB = vertex(end, endSide, b);
+
+        out.push_back(startA);
+        out.push_back(startB);
+        out.push_back(endB);
+
+        out.push_back(startA);
+        out.push_back(endB);
+        out.push_back(endA);
+    }
+}
+
+// Cross-section for the in-game trail. Empty means the vanilla trail is left
+// alone.
+const std::vector<WaveNode>& Utils::getWaveProfile(bool secondPlayer) {
+    static std::vector<WaveNode> profiles[2];
 
     int index = secondPlayer ? 1 : 0;
 
@@ -539,12 +577,12 @@ const std::vector<WaveLayer>& Utils::getWaveLayers(bool secondPlayer) {
             secondPlayer && isSettingEnabled(P2_SEPARATE)
         );
 
-        layers[index] = usesPlayerColor && !glow.enabled
-            ? std::vector<WaveLayer>{}
-            : computeWaveLayers(config, glow);
+        profiles[index] = usesPlayerColor && !glow.enabled
+            ? std::vector<WaveNode>{}
+            : computeWaveProfile(config, glow);
     }
 
-    return layers[index];
+    return profiles[index];
 }
 
 // rectInPixels, when given, is the texture area the gradient spans. The

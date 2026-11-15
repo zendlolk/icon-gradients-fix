@@ -34,8 +34,9 @@ public:
     static WaveGlowSettings getWaveGlow(bool);
     static void saveWaveGlow(WaveGlowSettings, bool);
     static float getWaveGlowReach(const WaveGlowSettings&);
-    static std::vector<WaveLayer> computeWaveLayers(const GradientConfig&, const WaveGlowSettings&);
-    static const std::vector<WaveLayer>& getWaveLayers(bool);
+    static std::vector<WaveNode> computeWaveProfile(const GradientConfig&, const WaveGlowSettings&);
+    static const std::vector<WaveNode>& getWaveProfile(bool);
+    static void appendWaveSegment(const std::vector<WaveNode>&, const CCPoint&, const CCPoint&, const CCPoint&, const CCPoint&, float, std::vector<ccV2F_C4B_T2F>&);
     static void invalidateWaveBands();
 
     static void setDrawNodeVertices(CCDrawNode*, const std::vector<ccV2F_C4B_T2F>&);

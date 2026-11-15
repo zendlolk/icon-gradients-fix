@@ -113,7 +113,7 @@ void PointsLayer::updateWaveLayout() {
 
     WaveGlowSettings glow = Utils::getWaveGlow(m_layer->isSecondPlayer());
 
-    float halfHeight = std::clamp(44.f / Utils::getWaveGlowReach(glow), 11.f, 28.f);
+    float halfHeight = std::clamp(46.f / Utils::getWaveGlowReach(glow), 9.f, 28.f);
 
     m_wave->setContentSize({ 150.f, halfHeight * 2.f });
     m_waveIcon->setPosition({ 154.f, halfHeight });
@@ -430,23 +430,20 @@ void PointsLayer::updateGradient(GradientConfig config, ColorType colorType, boo
 
         Utils::setIconColors(m_waveIcon, ColorType::Main, false, secondPlayer);
 
-        m_waveDraw->clear();
+        // The same cross-section the game draws, on a straight trail.
+        std::vector<ccV2F_C4B_T2F> vertices;
 
-        // Same layers the game draws, as stacked strips of a straight trail.
-        for (const WaveLayer& layer : Utils::computeWaveLayers(config, Utils::getWaveGlow(secondPlayer))) {
-            float halfHeight = size.height * layer.scale / 2.f;
+        Utils::appendWaveSegment(
+            Utils::computeWaveProfile(config, Utils::getWaveGlow(secondPlayer)),
+            { 0.f, size.height / 2.f },
+            { size.width, size.height / 2.f },
+            { 0.f, size.height / 2.f },
+            { 0.f, size.height / 2.f },
+            1.f,
+            vertices
+        );
 
-            CCPoint verts[4] = {
-                {0.f, size.height / 2.f - halfHeight},
-                {0.f, size.height / 2.f + halfHeight},
-                {size.width, size.height / 2.f + halfHeight},
-                {size.width, size.height / 2.f - halfHeight}
-            };
-
-            ccColor4F color = ccc4FFromccc4B(layer.color);
-
-            m_waveDraw->drawPolygon(verts, 4, color, 0.f, color);
-        }
+        Utils::setDrawNodeVertices(m_waveDraw, vertices);
 
         return;
     }
