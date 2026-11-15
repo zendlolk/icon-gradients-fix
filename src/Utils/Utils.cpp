@@ -1399,21 +1399,27 @@ CCSprite* Utils::updateSpriteGlow(CCSprite* real, GradientConfig config, IconTyp
     float radius = getSpriteGlowRadius(settings);
     float pad = std::ceil(radius) + 2.f;
 
-    // The same piece of the sprite sheet, with room around it.
-    CCRect rect = frame->getRect();
+    float scale = CCDirector::get()->getContentScaleFactor();
 
-    rect.origin.x -= pad;
-    rect.origin.y -= pad;
-    rect.size.width += pad * 2.f;
-    rect.size.height += pad * 2.f;
+    // The same piece of the sprite sheet, with room around it. This way of
+    // making a frame takes texture pixels, not the points everything else
+    // here is in.
+    float padPixels = pad * scale;
 
-    CCSize originalSize = frame->getOriginalSize();
+    CCRect rect = frame->getRectInPixels();
 
-    originalSize.width += pad * 2.f;
-    originalSize.height += pad * 2.f;
+    rect.origin.x -= padPixels;
+    rect.origin.y -= padPixels;
+    rect.size.width += padPixels * 2.f;
+    rect.size.height += padPixels * 2.f;
+
+    CCSize originalSize = frame->getOriginalSizeInPixels();
+
+    originalSize.width += padPixels * 2.f;
+    originalSize.height += padPixels * 2.f;
 
     glow->setDisplayFrame(CCSpriteFrame::createWithTexture(
-        frame->getTexture(), rect, frame->isRotated(), frame->getOffset(), originalSize
+        frame->getTexture(), rect, frame->isRotated(), frame->getOffsetInPixels(), originalSize
     ));
 
     glow->setAnchorPoint({0.5f, 0.5f});
@@ -1441,8 +1447,6 @@ CCSprite* Utils::updateSpriteGlow(CCSprite* real, GradientConfig config, IconTyp
     CCSize maskSize = frame->isRotated()
         ? CCSize{ frameRect.size.height, frameRect.size.width }
         : frameRect.size;
-
-    float scale = CCDirector::get()->getContentScaleFactor();
 
     glUniform1i(glGetUniformLocation(programID, "u_mode"), 0);
     glUniform2f(glGetUniformLocation(programID, "u_maskMin"), frameRect.origin.x / texSize.width, frameRect.origin.y / texSize.height);
@@ -1474,12 +1478,24 @@ CCSprite* Utils::updateBarGlow(CCSprite* fill, const CCRect& fullRect, GradientC
     float radius = getSpriteGlowRadius(settings);
     float pad = std::ceil(radius * 1.7f) + 2.f;
 
-    CCRect rect = fullRect;
+    float scale = CCDirector::get()->getContentScaleFactor();
 
-    rect.origin.x -= pad;
-    rect.origin.y -= pad;
-    rect.size.width += pad * 2.f;
-    rect.size.height += pad * 2.f;
+    CCRect fullRectPixels = CCRect(
+        fullRect.origin.x * scale,
+        fullRect.origin.y * scale,
+        fullRect.size.width * scale,
+        fullRect.size.height * scale
+    );
+
+    // This way of making a frame takes texture pixels, not points.
+    float padPixels = pad * scale;
+
+    CCRect rect = fullRectPixels;
+
+    rect.origin.x -= padPixels;
+    rect.origin.y -= padPixels;
+    rect.size.width += padPixels * 2.f;
+    rect.size.height += padPixels * 2.f;
 
     glow->setDisplayFrame(CCSpriteFrame::createWithTexture(
         fill->getTexture(), rect, false, {0.f, 0.f}, rect.size
@@ -1489,15 +1505,6 @@ CCSprite* Utils::updateBarGlow(CCSprite* fill, const CCRect& fullRect, GradientC
     glow->setAnchorPoint({0.f, 0.f});
     glow->setPosition({-pad, -pad});
     glow->setVisible(true);
-
-    float scale = CCDirector::get()->getContentScaleFactor();
-
-    CCRect fullRectPixels = CCRect(
-        fullRect.origin.x * scale,
-        fullRect.origin.y * scale,
-        fullRect.size.width * scale,
-        fullRect.size.height * scale
-    );
 
     applyGradient(glow, config, static_cast<IconType>(-2), ColorType::Main, 801, false, false, inGame, 66, false, &fullRectPixels, true, false);
 

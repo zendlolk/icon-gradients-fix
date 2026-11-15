@@ -12,6 +12,15 @@ struct TrailPiece {
 
 // While set, quads the given node asks to draw are recorded here instead of
 // being drawn. Only ever set for the duration of a captureStroke call.
+// One end of a piece: where it is, where the piece's other end is, the
+// direction across the trail there, and whether another piece starts here.
+struct TrailEnd {
+    CCPoint point;
+    CCPoint opposite;
+    CCPoint side;
+    bool joined;
+};
+
 static CCDrawNode* s_captureNode = nullptr;
 static std::vector<std::array<CCPoint, 4>>* s_captured = nullptr;
 
@@ -91,6 +100,7 @@ void ProHardStreak::updateStroke(float dt) {
     static std::vector<std::array<CCPoint, 4>> narrow;
     static std::vector<std::array<CCPoint, 4>> wide;
     static std::vector<TrailPiece> pieces;
+    static std::vector<TrailEnd> ends;
     static std::vector<ccV2F_C4B_T2F> vertices;
 
     // Ask the game where the trail is, at two widths, without drawing it.
@@ -167,43 +177,49 @@ void ProHardStreak::updateStroke(float dt) {
 
         // The pieces are straight-ended, so where two meet at an angle the
         // outside of the corner is left empty. Fill it with a rounded join.
-        // Ends that meet nothing get rounded off the same way.
-        for (size_t i = 0; i < pieces.size(); i++) {
-            const TrailPiece& piece = pieces[i];
+        // Ends that meet nothing get rounded off instead.
+        //
+        // Pieces are matched by position rather than by order, since nothing
+        // says which way round the game hands them over.
+        ends.clear();
 
-            bool joined = false;
+        for (const TrailPiece& piece : pieces) {
+            ends.push_back({ piece.end, piece.start, piece.endSide, false });
+            ends.push_back({ piece.start, piece.end, piece.startSide, false });
+        }
 
-            if (i + 1 < pieces.size()) {
-                const TrailPiece& next = pieces[i + 1];
+        for (size_t i = 0; i < ends.size(); i++) {
+            TrailEnd& end = ends[i];
 
-                if (ccpDistance(piece.end, next.start) < 0.05f) {
-                    joined = true;
+            if (end.joined) continue;
 
-                    // Points into the corner; the gap is on the other side.
-                    CCPoint inward = unit(piece.start - piece.end) + unit(next.end - next.start);
+            for (size_t j = i + 1; j < ends.size(); j++) {
+                TrailEnd& other = ends[j];
 
-                    if (ccpLength(inward) > 0.02f) {
-                        CCPoint from = ccpDot(piece.endSide, inward) < 0.f ? piece.endSide : piece.endSide * -1.f;
-                        CCPoint to = ccpDot(next.startSide, inward) < 0.f ? next.startSide : next.startSide * -1.f;
+                if (other.joined || ccpDistance(end.point, other.point) > 0.05f) continue;
 
-                        Utils::appendWaveFan(profile, piece.end, from, to, opacity, vertices);
-                    }
+                end.joined = true;
+                other.joined = true;
+
+                // Points into the corner; the gap is on the other side.
+                CCPoint inward = unit(end.opposite - end.point) + unit(other.opposite - other.point);
+
+                if (ccpLength(inward) > 0.02f) {
+                    CCPoint from = ccpDot(end.side, inward) < 0.f ? end.side : end.side * -1.f;
+                    CCPoint to = ccpDot(other.side, inward) < 0.f ? other.side : other.side * -1.f;
+
+                    Utils::appendWaveFan(profile, end.point, from, to, opacity, vertices);
                 }
+
+                break;
             }
 
-            if (!joined) {
-                CCPoint ahead = unit(piece.end - piece.start) * ccpLength(piece.endSide);
+            if (end.joined) continue;
 
-                Utils::appendWaveFan(profile, piece.end, piece.endSide, ahead, opacity, vertices);
-                Utils::appendWaveFan(profile, piece.end, ahead, piece.endSide * -1.f, opacity, vertices);
-            }
+            CCPoint outward = unit(end.point - end.opposite) * ccpLength(end.side);
 
-            if (i == 0 || ccpDistance(pieces[i - 1].end, piece.start) >= 0.05f) {
-                CCPoint behind = unit(piece.start - piece.end) * ccpLength(piece.startSide);
-
-                Utils::appendWaveFan(profile, piece.start, piece.startSide, behind, opacity, vertices);
-                Utils::appendWaveFan(profile, piece.start, behind, piece.startSide * -1.f, opacity, vertices);
-            }
+            Utils::appendWaveFan(profile, end.point, end.side, outward, opacity, vertices);
+            Utils::appendWaveFan(profile, end.point, outward, end.side * -1.f, opacity, vertices);
         }
     }
 
