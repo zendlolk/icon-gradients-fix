@@ -1602,7 +1602,8 @@ float Utils::getBarFlashRate(const BarGlowEffects& effects, float progress, floa
 
     float start = fromStartPos ? runStart + effects.startPosOffset : effects.flashStart;
 
-    if (start >= 0.999f || progress < start) return 0.f;
+    // A full bar means the level is complete: the glow stays, steady.
+    if (start >= 0.999f || progress < start || progress >= 0.999f) return 0.f;
 
     // Starts slow and picks up pace until the level ends.
     float along = std::clamp((progress - start) / (1.f - start), 0.f, 1.f);

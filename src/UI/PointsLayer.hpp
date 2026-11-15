@@ -27,6 +27,7 @@ private:
     float m_barPreviewSpeed = 0.5f;
 
     bool m_barPreviewEnabled = true;
+    bool m_barDragging = false;
     float m_barFlashPhase = 0.f;
 
     CCNode* m_wave = nullptr;
@@ -68,6 +69,9 @@ private:
 
     void updateBarPreview(float);
     void setBarPreviewFill(float, float);
+
+    bool isBarPreviewPlaying();
+    bool dragBarPreview(CCTouch*, bool);
     void updateWaveLayout();
 
     CCPoint constrainPoint(CCPoint);
