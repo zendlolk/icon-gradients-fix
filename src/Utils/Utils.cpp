@@ -480,13 +480,13 @@ void Utils::buildWaveGlowMesh(const std::vector<CCPoint>& trail, float halfWidth
         if (length < 0.0001f)
             miter = normalBefore;
         else {
-            miter = { miter.x / length, miter.y / length };
+            miter = ccp(miter.x / length, miter.y / length);
 
             // Stretch so the strip keeps its width through the corner, but
             // not without limit on very sharp turns.
             float cosine = std::max(0.34f, miter.x * normalBefore.x + miter.y * normalBefore.y);
 
-            miter = { miter.x / cosine, miter.y / cosine };
+            miter = ccp(miter.x / cosine, miter.y / cosine);
         }
 
         points.push_back(trail[i]);
