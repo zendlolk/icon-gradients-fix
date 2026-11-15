@@ -172,6 +172,40 @@ void PointsLayer::restartBarPreview(float from) {
     m_barFlashPhase = 0.f;
 }
 
+// The loop only plays when it is switched on and there is an effect to show.
+bool PointsLayer::isBarPreviewPlaying() {
+    return m_page == EditorPage::Bar
+        && m_barPreviewEnabled
+        && m_barGlow && m_barGlow->isVisible()
+        && (m_barEffects.buildUp || m_barEffects.flash);
+}
+
+// Lets the preview bar be grabbed and dragged to any point. `begin` is for a
+// new touch, which only counts if it lands on the bar. The loop carries on
+// from wherever the bar is let go.
+bool PointsLayer::dragBarPreview(CCTouch* touch, bool begin) {
+    if (!m_bar || !isBarPreviewPlaying()) return false;
+
+    CCPoint pos = m_bar->convertToNodeSpace(touch->getLocation());
+    CCSize size = m_bar->getContentSize();
+
+    if (begin) {
+        if (pos.x < -4.f || pos.x > size.width + 4.f || pos.y < -5.f || pos.y > size.height + 5.f)
+            return false;
+
+        m_barDragging = true;
+    }
+
+    if (!m_barDragging) return false;
+
+    float progress = std::clamp((pos.x - 2.f) / std::max(1.f, m_barFullSize.width), 0.f, 1.f);
+    float duration = 12.f - 10.5f * m_barPreviewSpeed;
+
+    m_barPreviewTime = (progress - m_barPreviewFrom) * duration;
+
+    return true;
+}
+
 // Shows the preview bar filled to `progress` with its glow at `strength`.
 void PointsLayer::setBarPreviewFill(float progress, float strength) {
     if (!m_barFill) return;
@@ -186,9 +220,10 @@ void PointsLayer::setBarPreviewFill(float progress, float strength) {
 void PointsLayer::updateBarPreview(float dt) {
     if (!m_barFill || m_page != EditorPage::Bar) return;
 
-    if (!m_barPreviewEnabled || !m_barGlow || !m_barGlow->isVisible() || (!m_barEffects.buildUp && !m_barEffects.flash)) {
+    if (!isBarPreviewPlaying()) {
         m_barPreviewTime = 0.f;
         m_barFlashPhase = 0.f;
+        m_barDragging = false;
 
         return setBarPreviewFill(1.f, 1.f);
     }
@@ -198,9 +233,16 @@ void PointsLayer::updateBarPreview(float dt) {
     float duration = 12.f - 10.5f * m_barPreviewSpeed;
     float span = std::max(0.01f, 1.f - m_barPreviewFrom);
 
-    m_barPreviewTime = std::fmod(m_barPreviewTime + dt, duration * span + 1.f);
+    // Held in place while it is being dragged. The time can be below zero
+    // after a drag to before the starting point; it just counts up from there.
+    if (!m_barDragging) {
+        m_barPreviewTime += dt;
 
-    float progress = std::min(1.f, m_barPreviewFrom + m_barPreviewTime / duration);
+        if (m_barPreviewTime >= duration * span + 1.f)
+            m_barPreviewTime = 0.f;
+    }
+
+    float progress = std::clamp(m_barPreviewFrom + m_barPreviewTime / duration, 0.f, 1.f);
     float rate = Utils::getBarFlashRate(m_barEffects, progress, 0.f, false);
 
     if (rate > 0.f)
@@ -407,6 +449,10 @@ bool PointsLayer::ccTouchBegan(CCTouch* touch, CCEvent* event) {
             m_removingPoints.erase(m_removingPoints.begin() + i);
         }
 
+    // Points sit on top of the bar, so they get the touch first.
+    if (!getNodeForPos(pos) && dragBarPreview(touch, true))
+        return true;
+
     if (ColorNode* point = getNodeForPos(pos)) {
         selectPoint(point);
 
@@ -428,6 +474,11 @@ bool PointsLayer::ccTouchBegan(CCTouch* touch, CCEvent* event) {
 }
 
 void PointsLayer::ccTouchMoved(CCTouch* touch, CCEvent* event) {
+    if (m_barDragging) {
+        dragBarPreview(touch, false);
+        return;
+    }
+
     CCLayer::ccTouchMoved(touch, event);
 
     if (m_isMoving && m_selectedPoint) {
@@ -443,6 +494,11 @@ void PointsLayer::ccTouchMoved(CCTouch* touch, CCEvent* event) {
 }
 
 void PointsLayer::ccTouchEnded(CCTouch* touch, CCEvent* event) {
+    if (m_barDragging) {
+        m_barDragging = false;
+        return;
+    }
+
     m_isMoving = false;
     setPointsHidden(m_pointsHidden, 0.3f);
     m_layer->pointReleased();
