@@ -31,11 +31,20 @@ public:
     static GradientConfig getDefaultWaveConfig(bool);
     static GradientConfig getSavedWaveConfig(bool);
     static void saveWaveConfig(GradientConfig, bool);
-    static WaveGlowSettings getWaveGlow(bool);
-    static void saveWaveGlow(WaveGlowSettings, bool);
-    static float getWaveGlowReach(const WaveGlowSettings&);
-    static std::vector<WaveNode> computeWaveProfile(const GradientConfig&, const WaveGlowSettings&);
+    static bool isGlowLinked();
+    static void setGlowLinked(bool);
+    static std::string getGlowID(GlowTarget, bool);
+    static GlowSettings getGlow(GlowTarget, bool);
+    static void saveGlow(GlowTarget, GlowSettings, bool);
+    static GlowSettings getWaveGlow(bool);
+
+    static CCSprite* updateSpriteGlow(CCSprite*, GradientConfig, IconType, int, bool, bool, int, const GlowSettings&);
+    static CCSprite* updateBarGlow(CCSprite*, const CCRect&, GradientConfig, bool, const GlowSettings&);
+    static void setBarGlowFill(CCSprite*, float);
+    static float getWaveGlowReach(const GlowSettings&);
+    static std::vector<WaveNode> computeWaveProfile(const GradientConfig&, const GlowSettings&);
     static const std::vector<WaveNode>& getWaveProfile(bool);
+    static void appendWaveFan(const std::vector<WaveNode>&, const CCPoint&, const CCPoint&, const CCPoint&, float, std::vector<ccV2F_C4B_T2F>&);
     static void appendWaveSegment(const std::vector<WaveNode>&, const CCPoint&, const CCPoint&, const CCPoint&, const CCPoint&, float, std::vector<ccV2F_C4B_T2F>&);
     static void invalidateWaveBands();
 
@@ -50,10 +59,10 @@ public:
     
     static void applyGradient(SimplePlayer*, Gradient, bool, bool, int);
     static void applyGradient(SimplePlayer*, GradientConfig, ColorType, bool, bool, int);
-    static void applyGradient(CCSprite*, GradientConfig, IconType, ColorType, int, bool, bool, bool, int, bool = false, const CCRect* = nullptr);
+    static void applyGradient(CCSprite*, GradientConfig, IconType, ColorType, int, bool, bool, bool, int, bool = false, const CCRect* = nullptr, bool = false, bool = false);
     static void applyBarGradient(CCSprite*, GradientConfig, bool, const CCRect* = nullptr);
     
-    static CCGLProgram* createShader(const std::string&, bool, bool, bool);
+    static CCGLProgram* createShader(const std::string&, bool, bool, bool, bool = false);
     
     static void patchBatchNode(CCSpriteBatchNode*);
     static void hideSprite(CCSprite*);

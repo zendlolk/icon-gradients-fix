@@ -275,16 +275,38 @@ void Utils::saveWaveConfig(GradientConfig config, bool secondPlayer) {
     invalidateWaveBands();
 }
 
-WaveGlowSettings Utils::getWaveGlow(bool secondPlayer) {
-    WaveGlowSettings settings;
+// When linked, player 2's glows always match player 1's: both read and write
+// player 1's settings.
+bool Utils::isGlowLinked() {
+    return Mod::get()->getSavedValue<bool>("glow-linked", true);
+}
 
-    std::string id = getWaveID(secondPlayer);
+void Utils::setGlowLinked(bool linked) {
+    Mod::get()->setSavedValue("glow-linked", linked);
+    invalidateWaveBands();
+}
+
+std::string Utils::getGlowID(GlowTarget target, bool secondPlayer) {
+    bool separate = secondPlayer && isSettingEnabled(P2_SEPARATE) && !isGlowLinked();
+
+    switch (target) {
+        case GlowTarget::Bar: return "bar-glow";
+        case GlowTarget::Wave: return separate ? "wave-trail-p2" : "wave-trail";
+        default: return separate ? "icon-glow-p2" : "icon-glow";
+    }
+}
+
+GlowSettings Utils::getGlow(GlowTarget target, bool secondPlayer) {
+    GlowSettings settings;
+
+    std::string id = getGlowID(target, secondPlayer);
 
     if (!Mod::get()->hasSavedValue(id))
         return settings;
 
     matjson::Value container = Mod::get()->getSavedValue<matjson::Value>(id);
 
+    // The wave trail keeps its glow next to its colours.
     if (!container.contains("glow"))
         return settings;
 
@@ -297,11 +319,14 @@ WaveGlowSettings Utils::getWaveGlow(bool secondPlayer) {
     return settings;
 }
 
-void Utils::saveWaveGlow(WaveGlowSettings settings, bool secondPlayer) {
-    std::string id = getWaveID(secondPlayer);
+void Utils::saveGlow(GlowTarget target, GlowSettings settings, bool secondPlayer) {
+    std::string id = getGlowID(target, secondPlayer);
 
     matjson::Value container = Mod::get()->getSavedValue<matjson::Value>(id);
     matjson::Value glow = matjson::Value{};
+
+    if (!container.isObject())
+        container = matjson::Value{};
 
     glow["enabled"] = settings.enabled;
     glow["gain"] = settings.gain;
@@ -313,6 +338,10 @@ void Utils::saveWaveGlow(WaveGlowSettings settings, bool secondPlayer) {
     invalidateWaveBands();
 }
 
+GlowSettings Utils::getWaveGlow(bool secondPlayer) {
+    return getGlow(GlowTarget::Wave, secondPlayer);
+}
+
 void Utils::invalidateWaveBands() {
     s_waveStyleDirty[0] = true;
     s_waveStyleDirty[1] = true;
@@ -320,7 +349,7 @@ void Utils::invalidateWaveBands() {
 
 // How far the glow reaches from the middle of the trail, in trail half-widths
 // (1 is the edge of the trail itself).
-float Utils::getWaveGlowReach(const WaveGlowSettings& settings) {
+float Utils::getWaveGlowReach(const GlowSettings& settings) {
     if (!settings.enabled) return 1.f;
 
     return 1.f + std::max(0.05f, settings.size * 2.5f) * 2.5f;
@@ -341,7 +370,7 @@ float Utils::getWaveGlowReach(const WaveGlowSettings& settings) {
 // while playing. Inside the trail the light is added to the colours, which
 // stay opaque so the background never shows through. Outside it becomes a
 // halo that fades out.
-std::vector<WaveNode> Utils::computeWaveProfile(const GradientConfig& config, const WaveGlowSettings& glow) {
+std::vector<WaveNode> Utils::computeWaveProfile(const GradientConfig& config, const GlowSettings& glow) {
     std::vector<std::pair<float, ccColor3B>> stops;
 
     for (const SimplePoint& point : config.points)
@@ -559,6 +588,71 @@ void Utils::appendWaveSegment(const std::vector<WaveNode>& profile, const CCPoin
     }
 }
 
+// Fills a wedge around `center` with the outer half of the cross-section,
+// sweeping from the direction of `from` to the direction of `to` the short
+// way round. Used where two pieces of trail meet at an angle, which would
+// otherwise leave a gap on the outside of the corner, and to round off the
+// trail's ends.
+void Utils::appendWaveFan(const std::vector<WaveNode>& profile, const CCPoint& center, const CCPoint& from, const CCPoint& to, float opacity, std::vector<ccV2F_C4B_T2F>& out) {
+    float fromAngle = std::atan2(from.y, from.x);
+    float sweep = std::atan2(to.y, to.x) - fromAngle;
+
+    while (sweep > 3.14159265f) sweep -= 6.2831853f;
+    while (sweep < -3.14159265f) sweep += 6.2831853f;
+
+    if (std::abs(sweep) < 0.03f) return;
+
+    float fromLength = std::sqrt(from.x * from.x + from.y * from.y);
+    float toLength = std::sqrt(to.x * to.x + to.y * to.y);
+
+    // One step per 22.5 degrees keeps the curve round without many triangles.
+    int steps = std::max(1, static_cast<int>(std::ceil(std::abs(sweep) / 0.3927f)));
+
+    // The profile is mirrored, so its second half runs from the middle out.
+    size_t middle = profile.size() / 2;
+
+    auto vertex = [&](int step, const WaveNode& node) {
+        float progress = static_cast<float>(step) / steps;
+        float angle = fromAngle + sweep * progress;
+        float length = (fromLength + (toLength - fromLength) * progress) * node.offset;
+
+        ccV2F_C4B_T2F ret;
+
+        ret.vertices.x = center.x + std::cos(angle) * length;
+        ret.vertices.y = center.y + std::sin(angle) * length;
+        ret.texCoords.u = 0.f;
+        ret.texCoords.v = 0.f;
+        ret.colors = node.color;
+        ret.colors.a = static_cast<GLubyte>(node.color.a * opacity);
+
+        return ret;
+    };
+
+    for (int step = 0; step < steps; step++)
+        for (size_t i = middle; i + 1 < profile.size(); i++) {
+            const WaveNode& a = profile[i];
+            const WaveNode& b = profile[i + 1];
+
+            if (a.color.a == 0 && b.color.a == 0) continue;
+
+            ccV2F_C4B_T2F nearA = vertex(step, a);
+            ccV2F_C4B_T2F nearB = vertex(step, b);
+            ccV2F_C4B_T2F farA = vertex(step + 1, a);
+            ccV2F_C4B_T2F farB = vertex(step + 1, b);
+
+            out.push_back(nearA);
+            out.push_back(nearB);
+            out.push_back(farB);
+
+            // At the very middle both inner corners are the same point.
+            if (a.offset <= 0.0001f) continue;
+
+            out.push_back(nearA);
+            out.push_back(farB);
+            out.push_back(farA);
+        }
+}
+
 // Cross-section for the in-game trail. Empty means the vanilla trail is left
 // alone.
 const std::vector<WaveNode>& Utils::getWaveProfile(bool secondPlayer) {
@@ -570,7 +664,7 @@ const std::vector<WaveNode>& Utils::getWaveProfile(bool secondPlayer) {
         s_waveStyleDirty[index] = false;
 
         GradientConfig config = getSavedWaveConfig(secondPlayer);
-        WaveGlowSettings glow = getWaveGlow(secondPlayer);
+        GlowSettings glow = getWaveGlow(secondPlayer);
 
         bool usesPlayerColor = config.isEmpty(
             ColorType::Main,
@@ -1018,13 +1112,13 @@ void Utils::applyGradient(SimplePlayer* icon, GradientConfig config, ColorType c
         applyGradient(sprite3, config, iconType, colorType, id3, blend, secondPlayer, false, extra, colorType == ColorType::Line);
 }
 
-CCGLProgram* Utils::createShader(const std::string& key, bool linear, bool blend, bool line) {
+CCGLProgram* Utils::createShader(const std::string& key, bool linear, bool blend, bool line, bool glow) {
     CCShaderCache* cache = CCShaderCache::sharedShaderCache();
     CCGLProgram* program = cache->programForKey(key.c_str());
      
     if (!program || key.empty()) {
         static std::filesystem::path vertPath = Mod::get()->getResourcesDir() / "position.vert";
-        std::filesystem::path shaderPath = Mod::get()->getResourcesDir() / fmt::format("{}_gradient{}.fsh", linear ? "linear" : "radial", line ? "_line" : blend ? "_blend" : "");
+        std::filesystem::path shaderPath = Mod::get()->getResourcesDir() / fmt::format("{}_gradient{}.fsh", linear ? "linear" : "radial", glow ? "_glow" : line ? "_line" : blend ? "_blend" : "");
 
         if (!std::filesystem::exists(vertPath) || !std::filesystem::exists(shaderPath))
             return nullptr;
@@ -1055,10 +1149,11 @@ CCGLProgram* Utils::createShader(const std::string& key, bool linear, bool blend
     return program;
 }
 
-void Utils::applyGradient(CCSprite* sprite, GradientConfig config, IconType iconType, ColorType colorType, int id, bool blend, bool secondPlayer, bool playerObject, int extra, bool line, const CCRect* rectOverride) {
+void Utils::applyGradient(CCSprite* sprite, GradientConfig config, IconType iconType, ColorType colorType, int id, bool blend, bool secondPlayer, bool playerObject, int extra, bool line, const CCRect* rectOverride, bool glow, bool rotatedOverride) {
     if (!sprite) return;
     
-    if (config.isEmpty(colorType, secondPlayer))
+    // A glow is drawn even for a plain colour.
+    if (!glow && config.isEmpty(colorType, secondPlayer))
         return sprite->setShaderProgram(
             CCShaderCache::sharedShaderCache()->programForKey(kCCShader_PositionTextureColor)
         );
@@ -1067,7 +1162,8 @@ void Utils::applyGradient(CCSprite* sprite, GradientConfig config, IconType icon
     
     if (extra != -4732) {
         std::string key = fmt::format(
-            "{}-{}-{}-{}-{}-{}-{}-{}"_spr,
+            "{}-{}-{}-{}-{}-{}-{}-{}-{}"_spr,
+            glow,
             config.isLinear,
             static_cast<int>(iconType),
             id,
@@ -1078,9 +1174,9 @@ void Utils::applyGradient(CCSprite* sprite, GradientConfig config, IconType icon
             extra
         );
         
-        program = createShader(key, config.isLinear, blend, line);
+        program = createShader(key, config.isLinear, blend, line, glow);
     } else {
-        program = createShader("", config.isLinear, blend, line);
+        program = createShader("", config.isLinear, blend, line, glow);
     }
     
     if (!program) return;
@@ -1095,7 +1191,7 @@ void Utils::applyGradient(CCSprite* sprite, GradientConfig config, IconType icon
     CCRect rectInPixels = rectOverride ? *rectOverride : frame->getRectInPixels();
     CCSize texSize = frame->getTexture()->getContentSizeInPixels();
 
-    bool rot = rectOverride ? false : frame->m_bRotated;
+    bool rot = rectOverride ? rotatedOverride : frame->m_bRotated;
 
     float uMin = rectInPixels.origin.x / texSize.width;
     float vMin = rectInPixels.origin.y / texSize.height;
@@ -1214,6 +1310,226 @@ void Utils::applyGradient(CCSprite* sprite, GradientConfig config, IconType icon
 
     GLint colorsLoc = glGetUniformLocation(program->getProgram(), "colors");
     glUniform4fv(colorsLoc, stopAt, colorsData.data());
+}
+
+// Sets the uniforms every glow shares. Expects the glow shader to be the
+// sprite's program already.
+static CCGLProgram* setGlowUniforms(CCSprite* glow, const GlowSettings& settings, float inner) {
+    CCGLProgram* program = glow->getShaderProgram();
+
+    if (!program) return nullptr;
+
+    program->use();
+
+    GLuint id = program->getProgram();
+
+    // Blur samples on three rings, weighted like a gaussian. Worked out once.
+    static std::vector<GLfloat> taps = [] {
+        std::vector<GLfloat> ret;
+
+        float total = 0.f;
+
+        for (int ring = 0; ring < 3; ring++) {
+            float radius = (ring + 1) / 3.f;
+            float weight = std::exp(-2.f * radius * radius) * radius;
+
+            for (int i = 0; i < 12; i++) {
+                float angle = (i + ring * 0.5f) / 12.f * 6.2831853f;
+
+                ret.push_back(std::cos(angle) * radius);
+                ret.push_back(std::sin(angle) * radius);
+                ret.push_back(weight);
+
+                total += weight;
+            }
+        }
+
+        for (size_t i = 2; i < ret.size(); i += 3)
+            ret[i] /= total;
+
+        return ret;
+    }();
+
+    glUniform3fv(glGetUniformLocation(id, "u_taps"), 36, taps.data());
+    glUniform1f(glGetUniformLocation(id, "u_gain"), settings.gain * 1.6f);
+    glUniform1f(glGetUniformLocation(id, "u_inner"), inner);
+
+    return program;
+}
+
+// How far a sprite's glow reaches, in the sprite's own units.
+static float getSpriteGlowRadius(const GlowSettings& settings) {
+    return 1.5f + settings.size * 10.f;
+}
+
+static CCSprite* getGlowSprite(CCSprite* parent, bool create) {
+    CCSprite* glow = typeinfo_cast<CCSprite*>(parent->getChildByID("soft-glow"_spr));
+
+    if (!glow && create) {
+        glow = CCSprite::create();
+        glow->setID("soft-glow"_spr);
+
+        // Premultiplied, see the glow shader.
+        glow->setBlendFunc({ GL_ONE, GL_ONE_MINUS_SRC_ALPHA });
+
+        parent->addChild(glow, 20);
+    }
+
+    return glow;
+}
+
+// Gives `real` a glow that follows its silhouette: a child sprite on a quad
+// bigger than the sprite, drawn with a shader that blurs the sprite's shape.
+// Call again whenever the sprite's frame or the settings change. Returns the
+// glow sprite, or null when the glow is off.
+CCSprite* Utils::updateSpriteGlow(CCSprite* real, GradientConfig config, IconType iconType, int id, bool secondPlayer, bool playerObject, int extra, const GlowSettings& settings) {
+    if (!real) return nullptr;
+
+    CCSprite* glow = getGlowSprite(real, settings.enabled);
+
+    if (!glow) return nullptr;
+
+    CCSpriteFrame* frame = real->displayFrame();
+
+    if (!settings.enabled || settings.gain <= 0.f || !frame || !frame->getTexture()) {
+        glow->setVisible(false);
+        return nullptr;
+    }
+
+    float radius = getSpriteGlowRadius(settings);
+    float pad = std::ceil(radius) + 2.f;
+
+    // The same piece of the sprite sheet, with room around it.
+    CCRect rect = frame->getRect();
+
+    rect.origin.x -= pad;
+    rect.origin.y -= pad;
+    rect.size.width += pad * 2.f;
+    rect.size.height += pad * 2.f;
+
+    CCSize originalSize = frame->getOriginalSize();
+
+    originalSize.width += pad * 2.f;
+    originalSize.height += pad * 2.f;
+
+    glow->setDisplayFrame(CCSpriteFrame::createWithTexture(
+        frame->getTexture(), rect, frame->isRotated(), frame->getOffset(), originalSize
+    ));
+
+    glow->setAnchorPoint({0.5f, 0.5f});
+    glow->setPosition(real->getContentSize() / 2.f);
+    glow->setFlipX(real->isFlipX());
+    glow->setFlipY(real->isFlipY());
+    glow->setVisible(true);
+
+    CCRect frameRect = frame->getRectInPixels();
+
+    applyGradient(glow, config, iconType, ColorType::Main, id, false, secondPlayer, playerObject, extra, false, &frameRect, true, frame->isRotated());
+
+    CCGLProgram* program = setGlowUniforms(glow, settings, 0.35f);
+
+    if (!program) {
+        glow->setVisible(false);
+        return nullptr;
+    }
+
+    GLuint programID = program->getProgram();
+
+    CCSize texSize = frame->getTexture()->getContentSizeInPixels();
+
+    // A rotated frame lies on its side on the sheet.
+    CCSize maskSize = frame->isRotated()
+        ? CCSize{ frameRect.size.height, frameRect.size.width }
+        : frameRect.size;
+
+    float scale = CCDirector::get()->getContentScaleFactor();
+
+    glUniform1i(glGetUniformLocation(programID, "u_mode"), 0);
+    glUniform2f(glGetUniformLocation(programID, "u_maskMin"), frameRect.origin.x / texSize.width, frameRect.origin.y / texSize.height);
+    glUniform2f(
+        glGetUniformLocation(programID, "u_maskMax"),
+        (frameRect.origin.x + maskSize.width) / texSize.width,
+        (frameRect.origin.y + maskSize.height) / texSize.height
+    );
+    glUniform2f(glGetUniformLocation(programID, "u_radius"), radius * scale / texSize.width, radius * scale / texSize.height);
+
+    return glow;
+}
+
+// Glow for a progress bar's fill sprite. `fullRect` is the texture rect of
+// the completely filled bar, in points. The fill itself changes every frame,
+// which setBarGlowFill follows.
+CCSprite* Utils::updateBarGlow(CCSprite* fill, const CCRect& fullRect, GradientConfig config, bool inGame, const GlowSettings& settings) {
+    if (!fill) return nullptr;
+
+    CCSprite* glow = getGlowSprite(fill, settings.enabled);
+
+    if (!glow) return nullptr;
+
+    if (!settings.enabled || settings.gain <= 0.f || !fill->getTexture() || fullRect.size.width <= 0.f) {
+        glow->setVisible(false);
+        return nullptr;
+    }
+
+    float radius = getSpriteGlowRadius(settings);
+    float pad = std::ceil(radius * 1.7f) + 2.f;
+
+    CCRect rect = fullRect;
+
+    rect.origin.x -= pad;
+    rect.origin.y -= pad;
+    rect.size.width += pad * 2.f;
+    rect.size.height += pad * 2.f;
+
+    glow->setDisplayFrame(CCSpriteFrame::createWithTexture(
+        fill->getTexture(), rect, false, {0.f, 0.f}, rect.size
+    ));
+
+    // Lines the full bar up with the fill, which grows from its left edge.
+    glow->setAnchorPoint({0.f, 0.f});
+    glow->setPosition({-pad, -pad});
+    glow->setVisible(true);
+
+    float scale = CCDirector::get()->getContentScaleFactor();
+
+    CCRect fullRectPixels = CCRect(
+        fullRect.origin.x * scale,
+        fullRect.origin.y * scale,
+        fullRect.size.width * scale,
+        fullRect.size.height * scale
+    );
+
+    applyGradient(glow, config, static_cast<IconType>(-2), ColorType::Main, 801, false, false, inGame, 66, false, &fullRectPixels, true, false);
+
+    // Mostly outwards: very little of it shows on the bar itself.
+    CCGLProgram* program = setGlowUniforms(glow, settings, 0.12f);
+
+    if (!program) {
+        glow->setVisible(false);
+        return nullptr;
+    }
+
+    GLuint programID = program->getProgram();
+
+    glUniform1i(glGetUniformLocation(programID, "u_mode"), 1);
+    glUniform1f(glGetUniformLocation(programID, "u_fill"), 1.f);
+    glUniform1f(glGetUniformLocation(programID, "u_sigma"), radius * 0.6f);
+    glUniform2f(glGetUniformLocation(programID, "u_barSize"), fullRect.size.width, fullRect.size.height);
+
+    return glow;
+}
+
+// How much of the bar is filled, from 0 to 1.
+void Utils::setBarGlowFill(CCSprite* glow, float fill) {
+    if (!glow || !glow->isVisible()) return;
+
+    CCGLProgram* program = glow->getShaderProgram();
+
+    if (!program) return;
+
+    program->use();
+
+    glUniform1f(glGetUniformLocation(program->getProgram(), "u_fill"), std::clamp(fill, 0.f, 1.f));
 }
 
 void Utils::patchBatchNode(CCSpriteBatchNode* node) {

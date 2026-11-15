@@ -6,6 +6,7 @@ class $modify(ProPlayLayer, PlayLayer) {
 
     struct Fields {
         bool m_barGradientApplied = false;
+        Ref<CCSprite> m_barGlow = nullptr;
     };
 
     void updateBarGradient();

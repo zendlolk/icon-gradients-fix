@@ -47,6 +47,13 @@ bool ProHardStreak::captureStroke(float dt, float waveSize, std::vector<std::arr
     return !quads.empty();
 }
 
+// Direction of a vector, or nothing for one too short to have a direction.
+static CCPoint unit(const CCPoint& v) {
+    float length = ccpLength(v);
+
+    return length > 0.0001f ? ccp(v.x / length, v.y / length) : ccp(0.f, 0.f);
+}
+
 static CCPoint midpoint(const CCPoint& a, const CCPoint& b) {
     return ccp((a.x + b.x) / 2.f, (a.y + b.y) / 2.f);
 }
@@ -154,9 +161,51 @@ void ProHardStreak::updateStroke(float dt) {
 
     float opacity = getOpacity() / 255.f;
 
-    if (opacity > 0.f)
+    if (opacity > 0.f) {
         for (const TrailPiece& piece : pieces)
             Utils::appendWaveSegment(profile, piece.start, piece.end, piece.startSide, piece.endSide, opacity, vertices);
+
+        // The pieces are straight-ended, so where two meet at an angle the
+        // outside of the corner is left empty. Fill it with a rounded join.
+        // Ends that meet nothing get rounded off the same way.
+        for (size_t i = 0; i < pieces.size(); i++) {
+            const TrailPiece& piece = pieces[i];
+
+            bool joined = false;
+
+            if (i + 1 < pieces.size()) {
+                const TrailPiece& next = pieces[i + 1];
+
+                if (ccpDistance(piece.end, next.start) < 0.05f) {
+                    joined = true;
+
+                    // Points into the corner; the gap is on the other side.
+                    CCPoint inward = unit(piece.start - piece.end) + unit(next.end - next.start);
+
+                    if (ccpLength(inward) > 0.02f) {
+                        CCPoint from = ccpDot(piece.endSide, inward) < 0.f ? piece.endSide : piece.endSide * -1.f;
+                        CCPoint to = ccpDot(next.startSide, inward) < 0.f ? next.startSide : next.startSide * -1.f;
+
+                        Utils::appendWaveFan(profile, piece.end, from, to, opacity, vertices);
+                    }
+                }
+            }
+
+            if (!joined) {
+                CCPoint ahead = unit(piece.end - piece.start) * ccpLength(piece.endSide);
+
+                Utils::appendWaveFan(profile, piece.end, piece.endSide, ahead, opacity, vertices);
+                Utils::appendWaveFan(profile, piece.end, ahead, piece.endSide * -1.f, opacity, vertices);
+            }
+
+            if (i == 0 || ccpDistance(pieces[i - 1].end, piece.start) >= 0.05f) {
+                CCPoint behind = unit(piece.start - piece.end) * ccpLength(piece.startSide);
+
+                Utils::appendWaveFan(profile, piece.start, piece.startSide, behind, opacity, vertices);
+                Utils::appendWaveFan(profile, piece.start, behind, piece.startSide * -1.f, opacity, vertices);
+            }
+        }
+    }
 
     Utils::setDrawNodeVertices(this, vertices);
 

@@ -58,6 +58,16 @@ void ProPlayerObject::updateFlip(float) {
         f->m_iconSpriteLine->setFlipX(m_iconSprite->isFlipX());
         f->m_iconSpriteLine->setFlipY(m_iconSprite->isFlipY());
     }
+
+    if (f->m_iconSoftGlow) {
+        f->m_iconSoftGlow->setFlipX(m_iconSprite->isFlipX());
+        f->m_iconSoftGlow->setFlipY(m_iconSprite->isFlipY());
+    }
+
+    if (f->m_vehicleSoftGlow) {
+        f->m_vehicleSoftGlow->setFlipX(m_vehicleSprite->isFlipX());
+        f->m_vehicleSoftGlow->setFlipY(m_vehicleSprite->isFlipY());
+    }
 }
 
 void ProPlayerObject::updateVisibility() {
@@ -111,6 +121,12 @@ void ProPlayerObject::updateVisibility() {
     if (f->m_vehicleSpriteLineWhitener)
         f->m_vehicleSpriteLineWhitener->setOpacity(m_vehicleSpriteWhitener->getOpacity());
     
+    if (f->m_iconSoftGlow)
+        f->m_iconSoftGlow->setOpacity(m_iconSprite->getOpacity());
+
+    if (f->m_vehicleSoftGlow)
+        f->m_vehicleSoftGlow->setOpacity(m_vehicleSprite->getOpacity());
+
     syncAnimSpriteOpacity(f->m_robotAnimSprites, m_robotBatchNode);
     syncAnimSpriteOpacity(f->m_spiderAnimSprites, m_spiderBatchNode);
 }
@@ -226,6 +242,17 @@ void ProPlayerObject::updateIconSprite(Gradient gradient, auto f) {
         f->m_iconSpriteLineWhitener->setVisible(!gradient.line.isEmpty(ColorType::Line, m_isSecondPlayer));
     }
     
+    // Soft glow around the icon's silhouette. Robots and spiders are made of
+    // many moving parts and are left out.
+    IconType glowType = getIconType();
+
+    f->m_iconSoftGlow = glowType == IconType::Robot || glowType == IconType::Spider
+        ? nullptr
+        : Utils::updateSpriteGlow(
+            m_iconSprite, gradient.main, glowType, 905, m_isSecondPlayer, true, 2,
+            Utils::getGlow(GlowTarget::Icon, m_isSecondPlayer)
+        );
+
     if (!f->m_iconSprite || !f->m_iconSprite->isVisible())
         m_iconSprite->setShaderProgram(
             CCShaderCache::sharedShaderCache()->programForKey(kCCShader_PositionTextureColor)
@@ -314,6 +341,11 @@ void ProPlayerObject::updateVehicleSprite(Gradient gradient, auto f) {
         f->m_vehicleSpriteLineWhitener->setVisible(!gradient.line.isEmpty(ColorType::Line, m_isSecondPlayer));
     }
     
+    f->m_vehicleSoftGlow = Utils::updateSpriteGlow(
+        m_vehicleSprite, gradient.main, getIconType(), 904, m_isSecondPlayer, true, 44,
+        Utils::getGlow(GlowTarget::Icon, m_isSecondPlayer)
+    );
+
     if (!f->m_vehicleSprite || !f->m_vehicleSprite->isVisible())
         m_vehicleSprite->setShaderProgram(
             CCShaderCache::sharedShaderCache()->programForKey(kCCShader_PositionTextureColor)

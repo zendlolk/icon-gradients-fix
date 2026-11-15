@@ -98,53 +98,78 @@ void GradientLayer::updatePlayer(bool secondPlayer) {
     
     updateGlowToggle();
     updateWhiteToggle();
-    updateGlowControls();
+    updateGlowControls(true);
 }
 
 // The wave trail's glow controls only exist on the wave page, and show the
 // settings of whichever player is being edited.
-void GradientLayer::updateGlowControls() {
-    bool visible = m_page == EditorPage::Wave;
+// Which glow the row at the bottom edits: it follows the page.
+GlowTarget GradientLayer::getGlowTarget() {
+    switch (m_page) {
+        case EditorPage::Bar: return GlowTarget::Bar;
+        case EditorPage::Wave: return GlowTarget::Wave;
+        default: return GlowTarget::Icon;
+    }
+}
 
-    for (CCNode* node : m_glowNodes)
-        node->setVisible(visible);
+// Shows the glow settings of whatever is being edited. Leaves the link toggle
+// alone unless asked, since a toggler flips itself after its own callback.
+void GradientLayer::updateGlowControls(bool updateLink) {
+    // The progress bar is shared, so there is nothing to link there.
+    bool canLink = m_page != EditorPage::Bar && Utils::isSettingEnabled(P2_SEPARATE);
 
-    if (!visible) return;
+    m_glowLinkToggle->setVisible(canLink);
+    m_glowLinkLabel->setVisible(canLink);
 
-    WaveGlowSettings glow = Utils::getWaveGlow(m_isSecondPlayer);
+    if (updateLink)
+        m_glowLinkToggle->toggle(Utils::isGlowLinked());
+
+    GlowSettings glow = Utils::getGlow(getGlowTarget(), m_isSecondPlayer);
 
     m_glowToggle->toggle(glow.enabled);
     m_glowGainSlider->setValue(glow.gain / 2.f);
     m_glowSizeSlider->setValue(glow.size);
 }
 
+// Redraws the preview after a glow setting changed.
+void GradientLayer::refreshGlow(bool layoutChanged) {
+    // The wave trail's preview is laid out around its glow.
+    if (m_page == EditorPage::Wave && layoutChanged)
+        load(m_selectedButton->getType(), m_currentColor, true, true, false);
+    else
+        updateGradient(true, true);
+}
+
 void GradientLayer::onGlowToggle(CCObject*) {
-    WaveGlowSettings glow = Utils::getWaveGlow(m_isSecondPlayer);
+    GlowSettings glow = Utils::getGlow(getGlowTarget(), m_isSecondPlayer);
 
     // The toggler only flips after this callback.
     glow.enabled = !m_glowToggle->isToggled();
 
-    Utils::saveWaveGlow(glow, m_isSecondPlayer);
+    Utils::saveGlow(getGlowTarget(), glow, m_isSecondPlayer);
 
-    load(m_selectedButton->getType(), m_currentColor, true, true, false);
+    refreshGlow(true);
 }
 
 void GradientLayer::onGlowSlider(CCObject*) {
-    WaveGlowSettings glow = Utils::getWaveGlow(m_isSecondPlayer);
+    GlowSettings glow = Utils::getGlow(getGlowTarget(), m_isSecondPlayer);
 
     float size = glow.size;
 
     glow.gain = std::clamp(m_glowGainSlider->getValue(), 0.f, 1.f) * 2.f;
     glow.size = std::clamp(m_glowSizeSlider->getValue(), 0.f, 1.f);
 
-    Utils::saveWaveGlow(glow, m_isSecondPlayer);
+    Utils::saveGlow(getGlowTarget(), glow, m_isSecondPlayer);
 
-    // Only the size changes how the preview is laid out; the gain just needs
-    // a redraw.
-    if (glow.enabled && size != glow.size)
-        load(m_selectedButton->getType(), m_currentColor, true, true, false);
-    else
-        updateGradient();
+    refreshGlow(glow.enabled && size != glow.size);
+}
+
+void GradientLayer::onGlowLink(CCObject*) {
+    Utils::setGlowLinked(!m_glowLinkToggle->isToggled());
+
+    // Linking changes whose settings player 2 shows.
+    updateGlowControls(false);
+    refreshGlow(true);
 }
 
 void GradientLayer::updateWhiteToggle() {
@@ -315,7 +340,7 @@ void GradientLayer::onPageToggle(CCObject* sender) {
 
     m_pointsLayer->setPage(m_page);
 
-    updateGlowControls();
+    updateGlowControls(true);
 
     load(m_selectedButton->getType(), m_currentColor, true, true, true);
 
@@ -779,7 +804,12 @@ void GradientLayer::scrollWheel(float y, float) {
 }
 
 bool GradientLayer::init() {
-    Popup::init(320, 280);
+    // Everything below is laid out for a 280 tall popup. The extra height is
+    // a row of glow controls along the bottom, and the rest is moved up by
+    // that much once it has all been created.
+    const float glowRowHeight = 30.f;
+
+    Popup::init(320, 280 + glowRowHeight);
 
     Dispatch<CCNode*, CCRect>("timestepyt.gdneko/create-neko-rect").send(m_mainLayer, {178.5f, 75, 259, 126});
 
@@ -819,6 +849,8 @@ bool GradientLayer::init() {
     btn->setPosition(m_size);
 
     m_buttonMenu->addChild(btn);
+
+    CCMenuItemSpriteExtra* settingsButton = btn;
 
     setTitle("Icon Gradients");
     m_title->setPosition({178.5f, 262});
@@ -1015,51 +1047,82 @@ bool GradientLayer::init() {
 
     m_buttonMenu->addChild(m_prevPageButton);
 
-    // Wave trail glow controls, shown on the wave page only.
+    // Glow controls: one row along the bottom, for whichever page is open.
+    std::vector<CCNode*> glowRow;
+
+    bg = NineSlice::create("square02b_001.png");
+    bg->setColor({0, 0, 0});
+    bg->setOpacity(49);
+    bg->setContentSize({ 592, 52 });
+    bg->setAnchorPoint({0, 0});
+    bg->setScale(0.5f);
+    bg->setPosition({12, 11});
+
+    m_mainLayer->addChild(bg);
+    glowRow.push_back(bg);
+
     m_glowToggle = CCMenuItemToggler::createWithStandardSprites(this, menu_selector(GradientLayer::onGlowToggle), 0.45f);
-    m_glowToggle->setPosition({233, 64});
+    m_glowToggle->setPosition({27, 24});
 
     m_buttonMenu->addChild(m_glowToggle);
-    m_glowNodes.push_back(m_glowToggle);
+    glowRow.push_back(m_glowToggle);
 
     lbl = CCLabelBMFont::create("glow", "bigFont.fnt");
     lbl->setScale(0.3f);
     lbl->setAnchorPoint({0.f, 0.5f});
-    lbl->setPosition({245, 64});
+    lbl->setPosition({38, 24});
 
     m_mainLayer->addChild(lbl);
-    m_glowNodes.push_back(lbl);
+    glowRow.push_back(lbl);
 
     lbl = CCLabelBMFont::create("gain", "bigFont.fnt");
     lbl->setScale(0.22f);
     lbl->setOpacity(140);
-    lbl->setPosition({233, 45});
+    lbl->setPosition({92, 24});
 
     m_mainLayer->addChild(lbl);
-    m_glowNodes.push_back(lbl);
+    glowRow.push_back(lbl);
 
-    m_glowGainSlider = Slider::create(this, menu_selector(GradientLayer::onGlowSlider), 0.28f);
-    m_glowGainSlider->setPosition({274, 45});
+    m_glowGainSlider = Slider::create(this, menu_selector(GradientLayer::onGlowSlider), 0.3f);
+    m_glowGainSlider->setPosition({138, 24});
 
     m_mainLayer->addChild(m_glowGainSlider);
-    m_glowNodes.push_back(m_glowGainSlider);
+    glowRow.push_back(m_glowGainSlider);
 
     lbl = CCLabelBMFont::create("size", "bigFont.fnt");
     lbl->setScale(0.22f);
     lbl->setOpacity(140);
-    lbl->setPosition({233, 28});
+    lbl->setPosition({184, 24});
 
     m_mainLayer->addChild(lbl);
-    m_glowNodes.push_back(lbl);
+    glowRow.push_back(lbl);
 
-    m_glowSizeSlider = Slider::create(this, menu_selector(GradientLayer::onGlowSlider), 0.28f);
-    m_glowSizeSlider->setPosition({274, 28});
+    m_glowSizeSlider = Slider::create(this, menu_selector(GradientLayer::onGlowSlider), 0.3f);
+    m_glowSizeSlider->setPosition({230, 24});
 
     m_mainLayer->addChild(m_glowSizeSlider);
-    m_glowNodes.push_back(m_glowSizeSlider);
+    glowRow.push_back(m_glowSizeSlider);
 
-    for (CCNode* node : m_glowNodes)
-        node->setVisible(false);
+    // Locked: player 2's glows always match player 1's.
+    m_glowLinkLabel = CCLabelBMFont::create("p1 = p2", "bigFont.fnt");
+    m_glowLinkLabel->setScale(0.2f);
+    m_glowLinkLabel->setOpacity(140);
+    m_glowLinkLabel->setPosition({277, 24});
+
+    m_mainLayer->addChild(m_glowLinkLabel);
+    glowRow.push_back(m_glowLinkLabel);
+
+    m_glowLinkToggle = CCMenuItemToggler::create(
+        CCSprite::createWithSpriteFrameName("GJ_lock_open_001.png"),
+        CCSprite::createWithSpriteFrameName("GJ_lock_001.png"),
+        this,
+        menu_selector(GradientLayer::onGlowLink)
+    );
+    m_glowLinkToggle->setScale(0.4f);
+    m_glowLinkToggle->setPosition({298, 24});
+
+    m_buttonMenu->addChild(m_glowLinkToggle);
+    glowRow.push_back(m_glowLinkToggle);
 
     m_playerToggle = PlayerToggle::create(this);
     m_playerToggle->setPosition({78, 260.5f});
@@ -1185,5 +1248,24 @@ bool GradientLayer::init() {
        nullptr
     ));
     
+    updateGlowControls(true);
+
+    // Move everything that was laid out for the shorter popup up above the
+    // glow row. The popup's own background, the buttons pinned to its
+    // corners and sides, and the row itself are already in the right place.
+    std::vector<CCNode*> keep = glowRow;
+
+    keep.push_back(m_bgSprite);
+    keep.push_back(m_buttonMenu);
+    keep.push_back(m_closeBtn);
+    keep.push_back(settingsButton);
+    keep.push_back(m_nextPageButton);
+    keep.push_back(m_prevPageButton);
+
+    for (CCNode* parent : { static_cast<CCNode*>(m_mainLayer), static_cast<CCNode*>(m_buttonMenu) })
+        for (CCNode* child : parent->getChildrenExt<CCNode*>())
+            if (std::find(keep.begin(), keep.end(), child) == keep.end())
+                child->setPositionY(child->getPositionY() + glowRowHeight);
+
     return true;
 }

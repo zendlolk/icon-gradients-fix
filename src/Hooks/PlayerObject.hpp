@@ -41,6 +41,9 @@ class $modify(ProPlayerObject, PlayerObject) {
 		Ref<CCSprite> m_vehicleSpriteLineSecondary = nullptr;
 		Ref<CCSprite> m_vehicleSpriteLineWhitener = nullptr;
 
+		Ref<CCSprite> m_iconSoftGlow = nullptr;
+		Ref<CCSprite> m_vehicleSoftGlow = nullptr;
+
 		std::vector<AnimSprite> m_robotAnimSprites;
 		std::vector<AnimSprite> m_spiderAnimSprites;
 

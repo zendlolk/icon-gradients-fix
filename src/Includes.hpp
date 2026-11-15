@@ -38,7 +38,14 @@ struct WaveNode {
     ccColor4B color;
 };
 
-struct WaveGlowSettings {
+// What a glow belongs to. Icons and the wave trail have one per player.
+enum class GlowTarget {
+    Icon = 0,
+    Bar = 1,
+    Wave = 2
+};
+
+struct GlowSettings {
     bool enabled = false;
     float gain = 0.5f; // 0 to 2
     float size = 0.5f; // 0 to 1

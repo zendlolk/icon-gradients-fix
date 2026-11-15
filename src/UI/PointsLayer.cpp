@@ -111,7 +111,7 @@ void PointsLayer::createWave() {
 void PointsLayer::updateWaveLayout() {
     if (!m_wave) return;
 
-    WaveGlowSettings glow = Utils::getWaveGlow(m_layer->isSecondPlayer());
+    GlowSettings glow = Utils::getWaveGlow(m_layer->isSecondPlayer());
 
     float halfHeight = std::clamp(46.f / Utils::getWaveGlowReach(glow), 9.f, 28.f);
 
@@ -420,8 +420,12 @@ void PointsLayer::updatePointScale(float value) {
 }
 
 void PointsLayer::updateGradient(GradientConfig config, ColorType colorType, bool force) {
-    if (m_page == EditorPage::Bar)
-        return Utils::applyBarGradient(m_barFill, config, false);
+    if (m_page == EditorPage::Bar) {
+        Utils::applyBarGradient(m_barFill, config, false);
+        Utils::updateBarGlow(m_barFill, m_barFill->getTextureRect(), config, false, Utils::getGlow(GlowTarget::Bar, false));
+
+        return;
+    }
 
     if (m_page == EditorPage::Wave) {
         bool secondPlayer = m_layer->isSecondPlayer();
@@ -449,6 +453,22 @@ void PointsLayer::updateGradient(GradientConfig config, ColorType colorType, boo
     }
 
     Utils::applyGradient(m_icon, config, colorType, false, m_layer->isSecondPlayer(), 1000);
+
+    // Soft glow around the previewed icon. Robots and spiders are made of
+    // many parts and have none, in the editor or in game.
+    bool secondPlayer = m_layer->isSecondPlayer();
+    bool hasGlow = m_type != IconType::Robot && m_type != IconType::Spider;
+
+    GlowSettings glow = Utils::getGlow(GlowTarget::Icon, secondPlayer);
+
+    if (!hasGlow)
+        glow.enabled = false;
+
+    Utils::updateSpriteGlow(
+        m_icon->m_firstLayer,
+        Utils::getSavedConfig(m_type, ColorType::Main, secondPlayer),
+        m_type, 906, secondPlayer, false, 1000, glow
+    );
 
     m_currentColor = colorType;
 

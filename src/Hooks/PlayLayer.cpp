@@ -7,8 +7,15 @@
 void ProPlayLayer::updateBarGradient() {
     auto f = m_fields.self();
 
-    if (f->m_barGradientApplied || !m_progressFill) return;
-    if (m_progressWidth <= 0.f || m_progressHeight <= 0.f) return;
+    if (!m_progressFill || m_progressWidth <= 0.f || m_progressHeight <= 0.f) return;
+
+    // The glow has to follow the bar as it fills.
+    if (f->m_barGradientApplied) {
+        if (f->m_barGlow)
+            Utils::setBarGlowFill(f->m_barGlow, m_progressFill->getTextureRect().size.width / m_progressWidth);
+
+        return;
+    }
 
     f->m_barGradientApplied = true;
 
@@ -25,6 +32,14 @@ void ProPlayLayer::updateBarGradient() {
     );
 
     Utils::applyBarGradient(m_progressFill, Utils::getSavedBarConfig(), true, &fullRect);
+
+    f->m_barGlow = Utils::updateBarGlow(
+        m_progressFill,
+        CCRect(origin.x, origin.y, m_progressWidth, m_progressHeight),
+        Utils::getSavedBarConfig(),
+        true,
+        Utils::getGlow(GlowTarget::Bar, false)
+    );
 }
 
 void ProPlayLayer::postUpdate(float dt) {

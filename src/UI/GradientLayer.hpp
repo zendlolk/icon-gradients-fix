@@ -40,7 +40,8 @@ private:
     Slider* m_glowGainSlider = nullptr;
     Slider* m_glowSizeSlider = nullptr;
 
-    std::vector<CCNode*> m_glowNodes;
+    CCMenuItemToggler* m_glowLinkToggle = nullptr;
+    CCLabelBMFont* m_glowLinkLabel = nullptr;
 
     CCLabelBMFont* m_countLabel = nullptr;
 
@@ -109,7 +110,12 @@ private:
     void onGlowToggle(CCObject*);
     void onGlowSlider(CCObject*);
 
-    void updateGlowControls();
+    void onGlowLink(CCObject*);
+
+    GlowTarget getGlowTarget();
+
+    void updateGlowControls(bool);
+    void refreshGlow(bool);
 
     GradientConfig getEditedConfig();
     ColorType getEditedColor();
