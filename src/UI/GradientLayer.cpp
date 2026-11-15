@@ -1,6 +1,7 @@
 #include "ColorSelectLayer.hpp"
 #include "GradientLayer.hpp"
 #include "LoadLayer.hpp"
+#include "BarGlowLayer.hpp"
 
 #include "Utils/Utils.hpp"
 #include "Utils/Cache.hpp"
@@ -121,6 +122,9 @@ void GradientLayer::updateGlowControls(bool updateLink) {
     m_glowLinkToggle->setVisible(canLink);
     m_glowLinkLabel->setVisible(canLink);
 
+    // Build-up and flashing only exist for the progress bar.
+    m_barGlowButton->setVisible(m_page == EditorPage::Bar);
+
     if (updateLink)
         m_glowLinkToggle->toggle(Utils::isGlowLinked());
 
@@ -162,6 +166,16 @@ void GradientLayer::onGlowSlider(CCObject*) {
     Utils::saveGlow(getGlowTarget(), glow, m_isSecondPlayer);
 
     refreshGlow(glow.enabled && size != glow.size);
+}
+
+void GradientLayer::onBarGlowOptions(CCObject*) {
+    BarGlowLayer::create(this)->show();
+}
+
+// Called by the bar glow options while they are being changed.
+void GradientLayer::barGlowChanged() {
+    if (m_page == EditorPage::Bar)
+        updateGradient(true, true);
 }
 
 void GradientLayer::onGlowLink(CCObject*) {
@@ -1123,6 +1137,17 @@ bool GradientLayer::init() {
 
     m_buttonMenu->addChild(m_glowLinkToggle);
     glowRow.push_back(m_glowLinkToggle);
+
+    // Takes the link toggle's place on the progress bar page.
+    spr = CCSprite::createWithSpriteFrameName("GJ_optionsBtn_001.png");
+    spr->setScale(0.33f);
+
+    m_barGlowButton = CCMenuItemSpriteExtra::create(spr, this, menu_selector(GradientLayer::onBarGlowOptions));
+    m_barGlowButton->setPosition({290, 24});
+    m_barGlowButton->setVisible(false);
+
+    m_buttonMenu->addChild(m_barGlowButton);
+    glowRow.push_back(m_barGlowButton);
 
     m_playerToggle = PlayerToggle::create(this);
     m_playerToggle->setPosition({78, 260.5f});

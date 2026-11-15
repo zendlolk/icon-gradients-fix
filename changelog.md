@@ -4,6 +4,7 @@
 * wave trail: second player gets its own trail when Separate Second Player Gradient is on
 * soft glow with gain and size for icons, the progress bar and the wave trail, set from a row at the bottom of the editor
 * glow can be linked so the second player always matches the first
+* progress bar glow can build up as the bar fills and flash near the end, with options for start positions
 * added a progress bar page to the gradient editor (arrow on the right of the menu), so the level progress bar can have a gradient too
 * fixed crash when the robot or spider gets rebuilt during a level (e.g. switching start positions)
 

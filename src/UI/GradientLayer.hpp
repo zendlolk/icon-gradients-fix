@@ -41,6 +41,7 @@ private:
     Slider* m_glowSizeSlider = nullptr;
 
     CCMenuItemToggler* m_glowLinkToggle = nullptr;
+    CCMenuItemSpriteExtra* m_barGlowButton = nullptr;
     CCLabelBMFont* m_glowLinkLabel = nullptr;
 
     CCLabelBMFont* m_countLabel = nullptr;
@@ -111,6 +112,7 @@ private:
     void onGlowSlider(CCObject*);
 
     void onGlowLink(CCObject*);
+    void onBarGlowOptions(CCObject*);
 
     GlowTarget getGlowTarget();
 
@@ -150,6 +152,8 @@ public:
     void updateColorToggles();
     
     bool isSecondPlayer();
+
+    void barGlowChanged();
 
     void pointMoved();
     void pointSelected(CCNode*);

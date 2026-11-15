@@ -58,9 +58,13 @@ void PointsLayer::createBar() {
     CCSize grooveSize = groove->getContentSize();
     CCSize fillSize = { grooveSize.width - 4.f, 8.f };
 
+    // Anchored on its left edge like the game's, so it can fill up in place.
     fill->setTextureRect({ 0.f, 0.f, fillSize.width, fillSize.height });
     fill->setColor(Utils::getPlayerColor(ColorType::Main, false));
-    fill->setPosition(grooveSize / 2.f);
+    fill->setAnchorPoint({0.f, 0.5f});
+    fill->setPosition({2.f, grooveSize.height / 2.f});
+
+    m_barFullSize = fillSize;
 
     groove->setPosition(grooveSize / 2.f);
 
@@ -132,8 +136,20 @@ void PointsLayer::setPage(EditorPage page) {
 
     m_page = page;
 
-    if (m_bar)
+    if (m_bar) {
         m_bar->setVisible(page == EditorPage::Bar);
+
+        // The bar preview plays through its glow effects while it is shown.
+        unschedule(schedule_selector(PointsLayer::updateBarPreview));
+
+        m_barPreviewTime = 0.f;
+        m_barFlashPhase = 0.f;
+
+        if (page == EditorPage::Bar)
+            schedule(schedule_selector(PointsLayer::updateBarPreview));
+        else
+            setBarPreviewFill(1.f, 1.f);
+    }
 
     if (m_wave)
         m_wave->setVisible(page == EditorPage::Wave);
@@ -142,10 +158,45 @@ void PointsLayer::setPage(EditorPage page) {
     m_shadow->setVisible(page == EditorPage::Icons);
 }
 
+// Shows the preview bar filled to `progress` with its glow at `strength`.
+void PointsLayer::setBarPreviewFill(float progress, float strength) {
+    if (!m_barFill) return;
+
+    m_barFill->setTextureRect({ 0.f, 0.f, m_barFullSize.width * progress, m_barFullSize.height });
+
+    Utils::setBarGlowState(m_barGlow, progress, strength);
+}
+
+// With glow effects on, the preview bar fills up on a loop so the build-up
+// and the flashing can be seen. Otherwise it just sits full.
+void PointsLayer::updateBarPreview(float dt) {
+    if (!m_barFill || m_page != EditorPage::Bar) return;
+
+    if (!m_barGlow || !m_barGlow->isVisible() || (!m_barEffects.buildUp && !m_barEffects.flash)) {
+        m_barPreviewTime = 0.f;
+        m_barFlashPhase = 0.f;
+
+        return setBarPreviewFill(1.f, 1.f);
+    }
+
+    // Four seconds to fill, then a pause while full.
+    m_barPreviewTime = std::fmod(m_barPreviewTime + dt, 5.f);
+
+    float progress = std::min(1.f, m_barPreviewTime / 4.f);
+    float rate = Utils::getBarFlashRate(m_barEffects, progress, 0.f, false);
+
+    if (rate > 0.f)
+        m_barFlashPhase = std::fmod(m_barFlashPhase + rate * dt, 1.f);
+    else
+        m_barFlashPhase = 0.f;
+
+    setBarPreviewFill(progress, Utils::getBarGlowStrength(m_barEffects, progress, m_barFlashPhase, rate > 0.f));
+}
+
 // The rect gradient points are positioned relative to.
 CCSize PointsLayer::getPreviewSize() {
     switch (m_page) {
-        case EditorPage::Bar: return m_barFill->getContentSize() * m_bar->getScale();
+        case EditorPage::Bar: return m_barFullSize * m_bar->getScale();
         case EditorPage::Wave: return m_wave->getContentSize();
         default: return ccp(30.5f, 30) * m_icon->getScale();
     }
@@ -421,8 +472,17 @@ void PointsLayer::updatePointScale(float value) {
 
 void PointsLayer::updateGradient(GradientConfig config, ColorType colorType, bool force) {
     if (m_page == EditorPage::Bar) {
-        Utils::applyBarGradient(m_barFill, config, false);
-        Utils::updateBarGlow(m_barFill, m_barFill->getTextureRect(), config, false, Utils::getGlow(GlowTarget::Bar, false));
+        // The fill may be part way through its preview loop, so everything is
+        // measured against the full bar rather than what is filled right now.
+        float scale = CCDirector::get()->getContentScaleFactor();
+
+        CCRect fullRect = CCRect(0.f, 0.f, m_barFullSize.width, m_barFullSize.height);
+        CCRect fullRectPixels = CCRect(0.f, 0.f, m_barFullSize.width * scale, m_barFullSize.height * scale);
+
+        Utils::applyBarGradient(m_barFill, config, false, &fullRectPixels);
+
+        m_barGlow = Utils::updateBarGlow(m_barFill, fullRect, config, false, Utils::getGlow(GlowTarget::Bar, false));
+        m_barEffects = Utils::getBarGlowEffects();
 
         return;
     }

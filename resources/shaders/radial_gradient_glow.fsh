@@ -28,6 +28,8 @@ uniform vec3 u_taps[36];
 uniform vec2 u_radius;
 
 uniform float u_gain;
+// Scales the whole glow, for glows that change while playing.
+uniform float u_strength;
 // How much light the glow adds on top of the sprite itself.
 uniform float u_inner;
 
@@ -101,6 +103,9 @@ void main() {
     // On the sprite: an even lift in brightness. It does not follow the blur,
     // which would show up as shapes inside the sprite.
     float inner = u_inner * lit * shape;
+
+    outer *= u_strength;
+    inner *= u_strength;
 
     // Premultiplied: around the sprite this blends over the background, on
     // top of the sprite it only adds light.

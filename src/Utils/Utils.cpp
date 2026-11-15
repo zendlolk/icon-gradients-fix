@@ -1353,6 +1353,7 @@ static CCGLProgram* setGlowUniforms(CCSprite* glow, const GlowSettings& settings
 
     glUniform3fv(glGetUniformLocation(id, "u_taps"), 36, taps.data());
     glUniform1f(glGetUniformLocation(id, "u_gain"), settings.gain * 1.6f);
+    glUniform1f(glGetUniformLocation(id, "u_strength"), 1.f);
     // Light added on top of the sprite itself. It has a ceiling, so a high
     // gain strengthens the glow around the sprite without washing the sprite
     // out. A bigger glow is allowed a little more.
@@ -1468,7 +1469,7 @@ CCSprite* Utils::updateSpriteGlow(CCSprite* real, GradientConfig config, IconTyp
 
 // Glow for a progress bar's fill sprite. `fullRect` is the texture rect of
 // the completely filled bar, in points. The fill itself changes every frame,
-// which setBarGlowFill follows.
+// which setBarGlowState follows.
 CCSprite* Utils::updateBarGlow(CCSprite* fill, const CCRect& fullRect, GradientConfig config, bool inGame, const GlowSettings& settings) {
     if (!fill) return nullptr;
 
@@ -1532,8 +1533,9 @@ CCSprite* Utils::updateBarGlow(CCSprite* fill, const CCRect& fullRect, GradientC
     return glow;
 }
 
-// How much of the bar is filled, from 0 to 1.
-void Utils::setBarGlowFill(CCSprite* glow, float fill) {
+// Follows the bar while playing: how much of it is filled (0 to 1), and how
+// strong the glow is right now (0 to 1 of what was set).
+void Utils::setBarGlowState(CCSprite* glow, float fill, float strength) {
     if (!glow || !glow->isVisible()) return;
 
     CCGLProgram* program = glow->getShaderProgram();
@@ -1543,6 +1545,82 @@ void Utils::setBarGlowFill(CCSprite* glow, float fill) {
     program->use();
 
     glUniform1f(glGetUniformLocation(program->getProgram(), "u_fill"), std::clamp(fill, 0.f, 1.f));
+    glUniform1f(glGetUniformLocation(program->getProgram(), "u_strength"), std::clamp(strength, 0.f, 1.f));
+}
+
+BarGlowEffects Utils::getBarGlowEffects() {
+    BarGlowEffects effects;
+
+    if (!Mod::get()->hasSavedValue("bar-glow-effects"))
+        return effects;
+
+    matjson::Value saved = Mod::get()->getSavedValue<matjson::Value>("bar-glow-effects");
+
+    auto number = [&saved](const char* key, float fallback, float min, float max) {
+        return std::clamp(static_cast<float>(saved[key].asDouble().unwrapOr(fallback)), min, max);
+    };
+
+    effects.buildUp = saved["build-up"].asBool().unwrapOr(effects.buildUp);
+    effects.buildPower = number("build-power", effects.buildPower, 1.f, 6.f);
+    effects.flash = saved["flash"].asBool().unwrapOr(effects.flash);
+    effects.flashStart = number("flash-start", effects.flashStart, 0.f, 1.f);
+    effects.flashSpeed = number("flash-speed", effects.flashSpeed, 0.f, 1.f);
+    effects.flashIntensity = number("flash-intensity", effects.flashIntensity, 0.f, 1.f);
+    effects.flashPower = number("flash-power", effects.flashPower, 1.f, 6.f);
+    effects.flashFromStartPos = saved["flash-start-pos"].asBool().unwrapOr(effects.flashFromStartPos);
+    effects.startPosOffset = number("start-pos-offset", effects.startPosOffset, 0.f, 1.f);
+
+    return effects;
+}
+
+void Utils::saveBarGlowEffects(const BarGlowEffects& effects) {
+    matjson::Value saved = matjson::Value{};
+
+    saved["build-up"] = effects.buildUp;
+    saved["build-power"] = effects.buildPower;
+    saved["flash"] = effects.flash;
+    saved["flash-start"] = effects.flashStart;
+    saved["flash-speed"] = effects.flashSpeed;
+    saved["flash-intensity"] = effects.flashIntensity;
+    saved["flash-power"] = effects.flashPower;
+    saved["flash-start-pos"] = effects.flashFromStartPos;
+    saved["start-pos-offset"] = effects.startPosOffset;
+
+    Mod::get()->setSavedValue("bar-glow-effects", saved);
+}
+
+// Flashes per second at this point in the level, or 0 when not flashing.
+// `runStart` is where this attempt began; from a start position the flashing
+// begins a set distance after that instead of at a fixed point.
+float Utils::getBarFlashRate(const BarGlowEffects& effects, float progress, float runStart, bool fromStartPos) {
+    if (!effects.flash) return 0.f;
+    if (fromStartPos && !effects.flashFromStartPos) return 0.f;
+
+    float start = fromStartPos ? runStart + effects.startPosOffset : effects.flashStart;
+
+    if (start >= 0.999f || progress < start) return 0.f;
+
+    // Starts slow and picks up pace until the level ends.
+    float along = std::clamp((progress - start) / (1.f - start), 0.f, 1.f);
+
+    const float slowest = 0.6f;
+    float fastest = 2.f + effects.flashSpeed * 14.f;
+
+    return slowest + (fastest - slowest) * std::pow(along, effects.flashPower);
+}
+
+// Glow strength from 0 to 1 of what was set. A flash only ever dims the
+// glow, so its peak is never brighter than the setting.
+float Utils::getBarGlowStrength(const BarGlowEffects& effects, float progress, float flashPhase, bool flashing) {
+    float strength = 1.f;
+
+    if (effects.buildUp)
+        strength = std::pow(std::clamp(progress, 0.f, 1.f), effects.buildPower);
+
+    if (flashing)
+        strength *= 1.f - effects.flashIntensity * (0.5f - 0.5f * std::cos(flashPhase * 6.2831853f));
+
+    return strength;
 }
 
 void Utils::patchBatchNode(CCSpriteBatchNode* node) {

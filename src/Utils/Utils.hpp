@@ -40,7 +40,12 @@ public:
 
     static CCSprite* updateSpriteGlow(CCSprite*, GradientConfig, IconType, int, bool, bool, int, const GlowSettings&);
     static CCSprite* updateBarGlow(CCSprite*, const CCRect&, GradientConfig, bool, const GlowSettings&);
-    static void setBarGlowFill(CCSprite*, float);
+    static void setBarGlowState(CCSprite*, float, float);
+
+    static BarGlowEffects getBarGlowEffects();
+    static void saveBarGlowEffects(const BarGlowEffects&);
+    static float getBarFlashRate(const BarGlowEffects&, float, float, bool);
+    static float getBarGlowStrength(const BarGlowEffects&, float, float, bool);
     static float getWaveGlowReach(const GlowSettings&);
     static std::vector<WaveNode> computeWaveProfile(const GradientConfig&, const GlowSettings&);
     static const std::vector<WaveNode>& getWaveProfile(bool);

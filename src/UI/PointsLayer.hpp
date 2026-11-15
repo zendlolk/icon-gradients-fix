@@ -16,6 +16,14 @@ private:
 
     CCNode* m_bar = nullptr;
     CCSprite* m_barFill = nullptr;
+    CCSprite* m_barGlow = nullptr;
+
+    CCSize m_barFullSize = { 0.f, 0.f };
+
+    BarGlowEffects m_barEffects;
+
+    float m_barPreviewTime = 0.f;
+    float m_barFlashPhase = 0.f;
 
     CCNode* m_wave = nullptr;
     CCDrawNode* m_waveDraw = nullptr;
@@ -53,6 +61,9 @@ private:
 
     void createBar();
     void createWave();
+
+    void updateBarPreview(float);
+    void setBarPreviewFill(float, float);
     void updateWaveLayout();
 
     CCPoint constrainPoint(CCPoint);

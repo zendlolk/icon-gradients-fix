@@ -60,6 +60,25 @@ struct GlowSettings {
     float size = 0.5f; // 0 to 1
 };
 
+// How the progress bar's glow changes while playing.
+struct BarGlowEffects {
+    // Glow grows from nothing as the bar fills.
+    bool buildUp = false;
+    float buildPower = 1.f; // 1 = linear, higher = later and steeper
+
+    // Glow pulses, faster the closer the bar is to full.
+    bool flash = false;
+    float flashStart = 0.8f; // progress (0 to 1) where it begins
+    float flashSpeed = 0.5f; // 0 to 1
+    float flashIntensity = 0.7f; // 0 to 1, how far each flash dims the glow
+    float flashPower = 1.f; // how the pace picks up: 1 = linear
+
+    // From a start position: whether to flash at all, and how much of the
+    // level has to be played first.
+    bool flashFromStartPos = false;
+    float startPosOffset = 0.5f;
+};
+
 struct SimplePoint {
     CCPoint pos;
     ccColor3B color;
