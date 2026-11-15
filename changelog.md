@@ -1,6 +1,8 @@
 # 1.3.12
 
 * added a wave trail page to the gradient editor: pick the colours from the middle of the trail to its edge, as solid bands or a smooth blend (makes the trail solid)
+* wave trail: second player gets its own trail when Separate Second Player Gradient is on
+* wave trail: optional soft glow with gain and size
 * added a progress bar page to the gradient editor (arrow on the right of the menu), so the level progress bar can have a gradient too
 * fixed crash when the robot or spider gets rebuilt during a level (e.g. switching start positions)
 

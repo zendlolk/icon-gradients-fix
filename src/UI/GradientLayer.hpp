@@ -35,6 +35,12 @@ private:
     CCMenuItemToggler* m_radialToggle = nullptr;
     CCMenuItemToggler* m_dotToggle = nullptr;
     CCMenuItemToggler* m_hideToggle = nullptr;
+    CCMenuItemToggler* m_glowToggle = nullptr;
+
+    Slider* m_glowGainSlider = nullptr;
+    Slider* m_glowSizeSlider = nullptr;
+
+    std::vector<CCNode*> m_glowNodes;
 
     CCLabelBMFont* m_countLabel = nullptr;
 
@@ -100,6 +106,10 @@ private:
     void onSave(CCObject*);
     void onLoad(CCObject*);
     void onPageToggle(CCObject*);
+    void onGlowToggle(CCObject*);
+    void onGlowSlider(CCObject*);
+
+    void updateGlowControls();
 
     GradientConfig getEditedConfig();
     ColorType getEditedColor();

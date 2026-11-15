@@ -2,43 +2,121 @@
 
 #include "HardStreak.hpp"
 
-// CCDrawNode::ensureCapacity is private, but it is the only safe way to grow
-// the node's vertex buffer. This grants access to it without changing the
-// class.
-template <auto Member>
-struct DrawNodeAccess {
-    friend void ensureDrawNodeCapacity(CCDrawNode* node, unsigned int count) {
-        (node->*Member)(count);
+static float distanceToSegment(const CCPoint& point, const CCPoint& a, const CCPoint& b) {
+    CCPoint ab = b - a;
+    CCPoint ap = point - a;
+
+    float lengthSq = ab.x * ab.x + ab.y * ab.y;
+    float t = lengthSq > 0.0001f ? std::clamp((ap.x * ab.x + ap.y * ab.y) / lengthSq, 0.f, 1.f) : 0.f;
+
+    float dx = ap.x - ab.x * t;
+    float dy = ap.y - ab.y * t;
+
+    return std::sqrt(dx * dx + dy * dy);
+}
+
+void ProHardStreak::clearGlow() {
+    auto f = m_fields.self();
+
+    if (!f->m_glow || !f->m_glowDrawn) return;
+
+    f->m_glow->clear();
+    f->m_glowDrawn = false;
+}
+
+// Expects this node's buffer to hold the trail at its full width, which is
+// what the glow's size is measured from.
+void ProHardStreak::updateGlow(const std::vector<WaveGlowRing>& rings) {
+    if (rings.empty() || m_nBufferCount <= 0 || !m_pointArray)
+        return clearGlow();
+
+    std::vector<CCPoint> trail;
+
+    auto addPoint = [&trail](const CCPoint& point) {
+        if (trail.empty() || ccpDistance(trail.back(), point) > 0.01f)
+            trail.push_back(point);
+    };
+
+    for (PointNode* node : CCArrayExt<PointNode*>(m_pointArray))
+        addPoint(node->m_point);
+
+    addPoint(m_currentPoint);
+
+    if (trail.size() < 2)
+        return clearGlow();
+
+    // The trail's width is not stored anywhere, so take it from what the game
+    // just drew: how far its vertices are from the trail's centre line.
+    float halfWidth = 0.f;
+    int checked = std::min<int>(m_nBufferCount, 96);
+
+    for (int i = 0; i < checked; i++) {
+        CCPoint vertex = { m_pBuffer[i].vertices.x, m_pBuffer[i].vertices.y };
+        float closest = 100000.f;
+
+        for (size_t j = 0; j + 1 < trail.size(); j++)
+            closest = std::min(closest, distanceToSegment(vertex, trail[j], trail[j + 1]));
+
+        halfWidth = std::max(halfWidth, closest);
     }
-};
 
-template struct DrawNodeAccess<&CCDrawNode::ensureCapacity>;
+    // Anything outside this range means the trail is not shaped the way this
+    // expects, and a wrong glow is worse than none.
+    if (halfWidth < 0.5f || halfWidth > 60.f)
+        return clearGlow();
 
-void ensureDrawNodeCapacity(CCDrawNode*, unsigned int);
+    auto f = m_fields.self();
+
+    if (!f->m_glow) {
+        f->m_glow = CCDrawNode::create();
+        f->m_glow->setID("wave-glow"_spr);
+
+        // Additive: the glow only ever adds light, over the trail and around it.
+        f->m_glow->setBlendFunc({ GL_ONE, GL_ONE });
+
+        addChild(f->m_glow, 1);
+    }
+
+    std::vector<ccV2F_C4B_T2F> vertices;
+
+    Utils::buildWaveGlowMesh(trail, halfWidth, rings, getOpacity() / 255.f, vertices);
+    Utils::setDrawNodeVertices(f->m_glow, vertices);
+
+    f->m_glowDrawn = !vertices.empty();
+}
 
 void ProHardStreak::updateStroke(float dt) {
-    if (!m_drawStreak || Utils::isSettingEnabled(MOD_DISABLED))
-        return HardStreak::updateStroke(dt);
+    // Not drawing: the game keeps or clears its own trail, so only make sure
+    // the glow does not outlive it.
+    if (!m_drawStreak) {
+        HardStreak::updateStroke(dt);
+
+        if (m_nBufferCount <= 0 || getOpacity() == 0 || !m_pointArray || m_pointArray->count() == 0)
+            clearGlow();
+
+        return;
+    }
 
     GJBaseGameLayer* gameLayer = GJBaseGameLayer::get();
 
-    if (!gameLayer)
-        return HardStreak::updateStroke(dt);
-
-    bool isFirstPlayer = gameLayer->m_player1 && gameLayer->m_player1->m_waveTrail == this;
-    bool isSecondPlayer = gameLayer->m_player2 && gameLayer->m_player2->m_waveTrail == this;
+    bool isFirstPlayer = gameLayer && gameLayer->m_player1 && gameLayer->m_player1->m_waveTrail == this;
+    bool isSecondPlayer = gameLayer && gameLayer->m_player2 && gameLayer->m_player2->m_waveTrail == this;
 
     if (
-        (!isFirstPlayer && !isSecondPlayer)
+        Utils::isSettingEnabled(MOD_DISABLED)
+        || (!isFirstPlayer && !isSecondPlayer)
         || (isSecondPlayer && Utils::isSettingEnabled(P2_DISABLED))
     ) {
-        return HardStreak::updateStroke(dt);
+        HardStreak::updateStroke(dt);
+        return clearGlow();
     }
 
-    const std::vector<WaveBand>& bands = Utils::getWaveBands();
+    const WaveStyle& style = Utils::getWaveStyle(isSecondPlayer);
 
-    if (bands.empty())
-        return HardStreak::updateStroke(dt);
+    if (style.bands.empty()) {
+        HardStreak::updateStroke(dt);
+        return updateGlow(style.glow);
+    }
 
     // Let the game build the trail once per band at that band's width, and
     // keep the triangles it produced, recoloured. That way the shape always
@@ -50,11 +128,15 @@ void ProHardStreak::updateStroke(float dt) {
 
     bool first = true;
 
-    for (const WaveBand& band : bands) {
+    for (const WaveBand& band : style.bands) {
         m_nBufferCount = 0;
         m_waveSize = waveSize * band.scale;
 
         HardStreak::updateStroke(first ? dt : 0.f);
+
+        // The first band is the full-width one the glow measures from.
+        if (first)
+            updateGlow(style.glow);
 
         first = false;
 
@@ -67,17 +149,8 @@ void ProHardStreak::updateStroke(float dt) {
     }
 
     m_waveSize = waveSize;
-    m_nBufferCount = 0;
 
-    if (!vertices.empty()) {
-        ensureDrawNodeCapacity(this, static_cast<unsigned int>(vertices.size()));
-
-        std::memcpy(m_pBuffer, vertices.data(), vertices.size() * sizeof(ccV2F_C4B_T2F));
-
-        m_nBufferCount = static_cast<GLsizei>(vertices.size());
-    }
-
-    m_bDirty = true;
+    Utils::setDrawNodeVertices(this, vertices);
 
     // Solid trail: the vanilla additive blend would wash the colours out.
     setBlendFunc({ GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA });

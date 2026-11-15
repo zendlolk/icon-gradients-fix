@@ -98,6 +98,53 @@ void GradientLayer::updatePlayer(bool secondPlayer) {
     
     updateGlowToggle();
     updateWhiteToggle();
+    updateGlowControls();
+}
+
+// The wave trail's glow controls only exist on the wave page, and show the
+// settings of whichever player is being edited.
+void GradientLayer::updateGlowControls() {
+    bool visible = m_page == EditorPage::Wave;
+
+    for (CCNode* node : m_glowNodes)
+        node->setVisible(visible);
+
+    if (!visible) return;
+
+    WaveGlowSettings glow = Utils::getWaveGlow(m_isSecondPlayer);
+
+    m_glowToggle->toggle(glow.enabled);
+    m_glowGainSlider->setValue(glow.gain / 3.f);
+    m_glowSizeSlider->setValue(glow.size);
+}
+
+void GradientLayer::onGlowToggle(CCObject*) {
+    WaveGlowSettings glow = Utils::getWaveGlow(m_isSecondPlayer);
+
+    // The toggler only flips after this callback.
+    glow.enabled = !m_glowToggle->isToggled();
+
+    Utils::saveWaveGlow(glow, m_isSecondPlayer);
+
+    load(m_selectedButton->getType(), m_currentColor, true, true, false);
+}
+
+void GradientLayer::onGlowSlider(CCObject*) {
+    WaveGlowSettings glow = Utils::getWaveGlow(m_isSecondPlayer);
+
+    float size = glow.size;
+
+    glow.gain = std::clamp(m_glowGainSlider->getValue(), 0.f, 1.f) * 3.f;
+    glow.size = std::clamp(m_glowSizeSlider->getValue(), 0.f, 1.f);
+
+    Utils::saveWaveGlow(glow, m_isSecondPlayer);
+
+    // Only the size changes how the preview is laid out; the gain just needs
+    // a redraw.
+    if (glow.enabled && size != glow.size)
+        load(m_selectedButton->getType(), m_currentColor, true, true, false);
+    else
+        updateGradient();
 }
 
 void GradientLayer::updateWhiteToggle() {
@@ -153,7 +200,7 @@ void GradientLayer::updateGlowToggle() {
 
 void GradientLayer::updatePlayerToggle() {
     Loader::get()->queueInMainThread([self = Ref(this)] {
-        self->m_playerToggle->setVisible(Utils::isSettingEnabled(P2_SEPARATE) && !self->m_extraPage);
+        self->m_playerToggle->setVisible(Utils::isSettingEnabled(P2_SEPARATE) && self->m_page != EditorPage::Bar);
         self->m_playerToggle->toggle(false);
     });
 }
@@ -219,7 +266,7 @@ GradientConfig GradientLayer::getEditedConfig() {
         return Utils::getSavedBarConfig();
 
     if (m_page == EditorPage::Wave)
-        return Utils::getSavedWaveConfig();
+        return Utils::getSavedWaveConfig(m_isSecondPlayer);
 
     return Utils::getSavedConfig(m_selectedButton->getType(), m_currentColor, m_isSecondPlayer);
 }
@@ -260,12 +307,15 @@ void GradientLayer::onPageToggle(CCObject* sender) {
     m_glowColorToggle->setVisible(!m_extraPage);
     m_whiteColorToggle->setVisible(!m_extraPage);
     m_lineColorToggle->setVisible(!m_extraPage);
-    m_playerToggle->setVisible(!m_extraPage && Utils::isSettingEnabled(P2_SEPARATE));
+    // The progress bar is shared, but each player has their own wave trail.
+    m_playerToggle->setVisible(m_page != EditorPage::Bar && Utils::isSettingEnabled(P2_SEPARATE));
 
     for (IconButton* button : m_buttons)
         button->setVisible(!m_extraPage);
 
     m_pointsLayer->setPage(m_page);
+
+    updateGlowControls();
 
     load(m_selectedButton->getType(), m_currentColor, true, true, true);
 
@@ -371,7 +421,7 @@ void GradientLayer::onAddPoint(CCObject*) {
         m_hideToggle->toggle(false);
     }
 
-    ccColor3B color = Utils::getPlayerColor(getEditedColor(), m_extraPage ? false : m_isSecondPlayer);
+    ccColor3B color = Utils::getPlayerColor(getEditedColor(), m_page == EditorPage::Bar ? false : m_isSecondPlayer);
     
     m_pointsLayer->getSelectedPoint()->setColor(color);
     m_picker->setColor(color);
@@ -477,7 +527,7 @@ void GradientLayer::save(GradientConfig config, ColorType colorType) {
         return Utils::saveBarConfig(config);
 
     if (m_page == EditorPage::Wave)
-        return Utils::saveWaveConfig(config);
+        return Utils::saveWaveConfig(config, m_isSecondPlayer);
 
     if (!m_selectedButton) return;
     
@@ -964,6 +1014,52 @@ bool GradientLayer::init() {
     m_prevPageButton->setVisible(false);
 
     m_buttonMenu->addChild(m_prevPageButton);
+
+    // Wave trail glow controls, shown on the wave page only.
+    m_glowToggle = CCMenuItemToggler::createWithStandardSprites(this, menu_selector(GradientLayer::onGlowToggle), 0.45f);
+    m_glowToggle->setPosition({233, 64});
+
+    m_buttonMenu->addChild(m_glowToggle);
+    m_glowNodes.push_back(m_glowToggle);
+
+    lbl = CCLabelBMFont::create("glow", "bigFont.fnt");
+    lbl->setScale(0.3f);
+    lbl->setAnchorPoint({0.f, 0.5f});
+    lbl->setPosition({245, 64});
+
+    m_mainLayer->addChild(lbl);
+    m_glowNodes.push_back(lbl);
+
+    lbl = CCLabelBMFont::create("gain", "bigFont.fnt");
+    lbl->setScale(0.22f);
+    lbl->setOpacity(140);
+    lbl->setPosition({233, 45});
+
+    m_mainLayer->addChild(lbl);
+    m_glowNodes.push_back(lbl);
+
+    m_glowGainSlider = Slider::create(this, menu_selector(GradientLayer::onGlowSlider), 0.28f);
+    m_glowGainSlider->setPosition({274, 45});
+
+    m_mainLayer->addChild(m_glowGainSlider);
+    m_glowNodes.push_back(m_glowGainSlider);
+
+    lbl = CCLabelBMFont::create("size", "bigFont.fnt");
+    lbl->setScale(0.22f);
+    lbl->setOpacity(140);
+    lbl->setPosition({233, 28});
+
+    m_mainLayer->addChild(lbl);
+    m_glowNodes.push_back(lbl);
+
+    m_glowSizeSlider = Slider::create(this, menu_selector(GradientLayer::onGlowSlider), 0.28f);
+    m_glowSizeSlider->setPosition({274, 28});
+
+    m_mainLayer->addChild(m_glowSizeSlider);
+    m_glowNodes.push_back(m_glowSizeSlider);
+
+    for (CCNode* node : m_glowNodes)
+        node->setVisible(false);
 
     m_playerToggle = PlayerToggle::create(this);
     m_playerToggle->setPosition({78, 260.5f});

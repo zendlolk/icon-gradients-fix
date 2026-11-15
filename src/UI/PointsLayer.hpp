@@ -19,6 +19,8 @@ private:
 
     CCNode* m_wave = nullptr;
     CCDrawNode* m_waveDraw = nullptr;
+    CCDrawNode* m_waveGlowDraw = nullptr;
+    SimplePlayer* m_waveIcon = nullptr;
 
     GradientLayer* m_layer = nullptr;
 
@@ -52,6 +54,7 @@ private:
 
     void createBar();
     void createWave();
+    void updateWaveLayout();
 
     CCPoint constrainPoint(CCPoint);
 

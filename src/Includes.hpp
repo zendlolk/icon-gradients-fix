@@ -36,6 +36,24 @@ struct WaveBand {
     ccColor3B color;
 };
 
+// One step of the glow's falloff: `offset` is the distance from the middle of
+// the trail in trail half-widths, `color` the light added there.
+struct WaveGlowRing {
+    float offset;
+    ccColor3B color;
+};
+
+struct WaveGlowSettings {
+    bool enabled = false;
+    float gain = 1.f; // 0 to 3
+    float size = 0.35f; // 0 to 1
+};
+
+struct WaveStyle {
+    std::vector<WaveBand> bands;
+    std::vector<WaveGlowRing> glow;
+};
+
 struct SimplePoint {
     CCPoint pos;
     ccColor3B color;

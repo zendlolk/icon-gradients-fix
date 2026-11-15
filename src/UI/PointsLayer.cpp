@@ -95,15 +95,45 @@ void PointsLayer::createWave() {
 
     m_wave->addChild(m_waveDraw);
 
-    SimplePlayer* icon = Utils::createIcon(IconType::Wave);
-    icon->setScale(1.6f);
-    icon->setPosition({size.width + 4.f, size.height / 2.f});
+    m_waveIcon = Utils::createIcon(IconType::Wave);
+    m_waveIcon->setScale(1.6f);
+    m_waveIcon->setPosition({size.width + 4.f, size.height / 2.f});
 
-    Utils::setIconColors(icon, ColorType::Main, false, false);
+    Utils::setIconColors(m_waveIcon, ColorType::Main, false, false);
 
-    m_wave->addChild(icon, 1);
+    m_wave->addChild(m_waveIcon, 1);
 
     addChild(m_wave);
+
+    // The glow can reach well past the trail, so it is clipped to the preview
+    // area to keep it off the rest of the editor.
+    CCLayerColor* stencil = CCLayerColor::create({255, 255, 255, 255}, 228.f, 100.f);
+    stencil->setPosition({74.f, 150.f});
+
+    CCClippingNode* clip = CCClippingNode::create(stencil);
+
+    m_waveGlowDraw = CCDrawNode::create();
+    m_waveGlowDraw->setBlendFunc({ GL_ONE, GL_ONE });
+
+    clip->addChild(m_waveGlowDraw);
+
+    addChild(clip);
+}
+
+// A bigger glow needs more room, so the previewed trail gets thinner as the
+// glow grows. Runs before points are laid out, since they follow its size.
+void PointsLayer::updateWaveLayout() {
+    if (!m_wave) return;
+
+    WaveGlowSettings glow = Utils::getWaveGlow(m_layer->isSecondPlayer());
+
+    float halfHeight = 28.f;
+
+    if (glow.enabled)
+        halfHeight = std::clamp(46.f / (1.f + Utils::getWaveGlowSigma(glow) * 2.5f), 14.f, 28.f);
+
+    m_wave->setContentSize({ 150.f, halfHeight * 2.f });
+    m_waveIcon->setPosition({ 154.f, halfHeight });
 }
 
 bool PointsLayer::hasPage(EditorPage page) {
@@ -396,11 +426,31 @@ void PointsLayer::updateGradient(GradientConfig config, ColorType colorType, boo
         return Utils::applyBarGradient(m_barFill, config, false);
 
     if (m_page == EditorPage::Wave) {
+        bool secondPlayer = m_layer->isSecondPlayer();
+
         CCSize size = m_wave->getContentSize();
+        CCPoint center = m_wave->getPosition();
+
+        std::vector<WaveBand> bands = Utils::computeWaveBands(config);
+        std::vector<ccV2F_C4B_T2F> glowVertices;
+
+        Utils::buildWaveGlowMesh(
+            {
+                { center.x - size.width / 2.f, center.y },
+                { center.x + size.width / 2.f, center.y }
+            },
+            size.height / 2.f,
+            Utils::computeWaveGlow(bands, Utils::getWaveGlow(secondPlayer)),
+            1.f,
+            glowVertices
+        );
+
+        Utils::setDrawNodeVertices(m_waveGlowDraw, glowVertices);
+        Utils::setIconColors(m_waveIcon, ColorType::Main, false, secondPlayer);
 
         m_waveDraw->clear();
 
-        for (const WaveBand& band : Utils::computeWaveBands(config)) {
+        for (const WaveBand& band : bands) {
             float halfHeight = size.height * band.scale / 2.f;
 
             CCPoint verts[4] = {
@@ -489,6 +539,11 @@ CCPoint PointsLayer::getRelativePos(ColorNode* point) {
 }
 
 void PointsLayer::loadPoints(GradientConfig config, bool animate) {
+    if (m_page == EditorPage::Wave)
+        updateWaveLayout();
+    else if (m_waveGlowDraw)
+        m_waveGlowDraw->clear();
+
     updateCenter();
 
     m_currentConfig = config;

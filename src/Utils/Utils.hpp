@@ -27,12 +27,20 @@ public:
     static GradientConfig getSavedBarConfig();
     static void saveBarConfig(GradientConfig);
 
-    static GradientConfig getDefaultWaveConfig();
-    static GradientConfig getSavedWaveConfig();
-    static void saveWaveConfig(GradientConfig);
+    static std::string getWaveID(bool);
+    static GradientConfig getDefaultWaveConfig(bool);
+    static GradientConfig getSavedWaveConfig(bool);
+    static void saveWaveConfig(GradientConfig, bool);
+    static WaveGlowSettings getWaveGlow(bool);
+    static void saveWaveGlow(WaveGlowSettings, bool);
+    static float getWaveGlowSigma(const WaveGlowSettings&);
     static std::vector<WaveBand> computeWaveBands(const GradientConfig&);
-    static const std::vector<WaveBand>& getWaveBands();
+    static std::vector<WaveGlowRing> computeWaveGlow(const std::vector<WaveBand>&, const WaveGlowSettings&);
+    static const WaveStyle& getWaveStyle(bool);
     static void invalidateWaveBands();
+
+    static void buildWaveGlowMesh(const std::vector<CCPoint>&, float, const std::vector<WaveGlowRing>&, float, std::vector<ccV2F_C4B_T2F>&);
+    static void setDrawNodeVertices(CCDrawNode*, const std::vector<ccV2F_C4B_T2F>&);
     static matjson::Value getSaveObject(GradientConfig);
 
     static Gradient getGradient(IconType, bool);

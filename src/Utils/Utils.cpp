@@ -1,6 +1,8 @@
 #include "Utils.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
 #include "Cache.hpp"
 
 #include "Hooks/SimplePlayer.hpp"
@@ -193,11 +195,45 @@ void Utils::saveBarConfig(GradientConfig config) {
     saveConfig(config, "progress-bar", "bar");
 }
 
+// CCDrawNode::ensureCapacity is private, but it is the only safe way to grow
+// the node's vertex buffer. This grants access to it without changing the
+// class.
+template <auto Member>
+struct DrawNodeAccess {
+    friend void ensureDrawNodeCapacity(CCDrawNode* node, unsigned int count) {
+        (node->*Member)(count);
+    }
+};
+
+template struct DrawNodeAccess<&CCDrawNode::ensureCapacity>;
+
+void ensureDrawNodeCapacity(CCDrawNode*, unsigned int);
+
+// Replaces everything a draw node draws with the given triangles.
+void Utils::setDrawNodeVertices(CCDrawNode* node, const std::vector<ccV2F_C4B_T2F>& vertices) {
+    node->m_nBufferCount = 0;
+
+    if (!vertices.empty()) {
+        ensureDrawNodeCapacity(node, static_cast<unsigned int>(vertices.size()));
+
+        std::memcpy(node->m_pBuffer, vertices.data(), vertices.size() * sizeof(ccV2F_C4B_T2F));
+
+        node->m_nBufferCount = static_cast<GLsizei>(vertices.size());
+    }
+
+    node->m_bDirty = true;
+}
+
+// Player 2 only has its own wave trail when it has its own gradients.
+std::string Utils::getWaveID(bool secondPlayer) {
+    return secondPlayer && isSettingEnabled(P2_SEPARATE) ? "wave-trail-p2" : "wave-trail";
+}
+
 // Wave trail points all sit on one line across the trail: y 0.5 is the middle
 // of the trail, y 0 and 1 are its edges. Only the distance from the middle
 // matters, so the trail is always symmetric.
-GradientConfig Utils::getDefaultWaveConfig() {
-    ccColor3B color = getPlayerColor(ColorType::Main, false);
+GradientConfig Utils::getDefaultWaveConfig(bool secondPlayer) {
+    ccColor3B color = getPlayerColor(ColorType::Main, secondPlayer && isSettingEnabled(P2_SEPARATE));
 
     return GradientConfig{
         {
@@ -208,31 +244,72 @@ GradientConfig Utils::getDefaultWaveConfig() {
     };
 }
 
-GradientConfig Utils::getSavedWaveConfig() {
-    if (!Mod::get()->hasSavedValue("wave-trail"))
-        return getDefaultWaveConfig();
+GradientConfig Utils::getSavedWaveConfig(bool secondPlayer) {
+    std::string id = getWaveID(secondPlayer);
 
-    matjson::Value container = Mod::get()->getSavedValue<matjson::Value>("wave-trail");
+    if (!Mod::get()->hasSavedValue(id))
+        return getDefaultWaveConfig(secondPlayer);
+
+    matjson::Value container = Mod::get()->getSavedValue<matjson::Value>(id);
 
     if (!container.contains("trail"))
-        return getDefaultWaveConfig();
+        return getDefaultWaveConfig(secondPlayer);
 
     return configFromObject(container["trail"]);
 }
 
-static bool s_waveBandsDirty = true;
+static bool s_waveStyleDirty[2] = { true, true };
 
-void Utils::saveWaveConfig(GradientConfig config) {
+void Utils::saveWaveConfig(GradientConfig config, bool secondPlayer) {
     // Pasted or loaded gradients can come from an icon; keep them on the line.
     for (SimplePoint& point : config.points)
         point.pos.x = 0.5f;
 
-    saveConfig(config, "wave-trail", "trail");
+    saveConfig(config, getWaveID(secondPlayer), "trail");
+    invalidateWaveBands();
+}
+
+WaveGlowSettings Utils::getWaveGlow(bool secondPlayer) {
+    WaveGlowSettings settings;
+
+    std::string id = getWaveID(secondPlayer);
+
+    if (!Mod::get()->hasSavedValue(id))
+        return settings;
+
+    matjson::Value container = Mod::get()->getSavedValue<matjson::Value>(id);
+
+    if (!container.contains("glow"))
+        return settings;
+
+    const matjson::Value& glow = container["glow"];
+
+    settings.enabled = glow["enabled"].asBool().unwrapOr(false);
+    settings.gain = std::clamp(static_cast<float>(glow["gain"].asDouble().unwrapOr(1.0)), 0.f, 3.f);
+    settings.size = std::clamp(static_cast<float>(glow["size"].asDouble().unwrapOr(0.35)), 0.f, 1.f);
+
+    return settings;
+}
+
+void Utils::saveWaveGlow(WaveGlowSettings settings, bool secondPlayer) {
+    std::string id = getWaveID(secondPlayer);
+
+    matjson::Value container = Mod::get()->getSavedValue<matjson::Value>(id);
+    matjson::Value glow = matjson::Value{};
+
+    glow["enabled"] = settings.enabled;
+    glow["gain"] = settings.gain;
+    glow["size"] = settings.size;
+
+    container["glow"] = glow;
+
+    Mod::get()->setSavedValue(id, container);
     invalidateWaveBands();
 }
 
 void Utils::invalidateWaveBands() {
-    s_waveBandsDirty = true;
+    s_waveStyleDirty[0] = true;
+    s_waveStyleDirty[1] = true;
 }
 
 // Turns the points into layers ordered from the full-width outer layer to the
@@ -304,21 +381,184 @@ std::vector<WaveBand> Utils::computeWaveBands(const GradientConfig& config) {
     return bands;
 }
 
-// Bands for the in-game trail. Empty means leave the vanilla trail alone.
-const std::vector<WaveBand>& Utils::getWaveBands() {
-    static std::vector<WaveBand> bands;
+// Blur radius of the glow, in trail half-widths.
+float Utils::getWaveGlowSigma(const WaveGlowSettings& settings) {
+    return std::max(0.05f, settings.size * 2.f);
+}
 
-    if (s_waveBandsDirty) {
-        s_waveBandsDirty = false;
+// A soft glow is the image blurred and added back on top. Across a straight
+// trail that blur only depends on the distance from the middle, so it is
+// worked out once here: the trail's cross-section is blurred with a gaussian
+// and sampled at a few distances. Drawing those samples as a mesh with
+// interpolated colours gives the same look as a real blur for almost no cost.
+std::vector<WaveGlowRing> Utils::computeWaveGlow(const std::vector<WaveBand>& bands, const WaveGlowSettings& settings) {
+    std::vector<WaveGlowRing> rings;
 
-        GradientConfig config = getSavedWaveConfig();
+    if (!settings.enabled || settings.gain <= 0.f || bands.empty()) return rings;
 
-        bands = config.isEmpty(ColorType::Main, false)
-            ? std::vector<WaveBand>{}
-            : computeWaveBands(config);
+    float sigma = getWaveGlowSigma(settings);
+    float reach = 1.f + sigma * 2.5f;
+
+    const int ringCount = 8;
+    const int samples = 32;
+
+    for (int i = 0; i < ringCount; i++) {
+        float offset = reach * i / (ringCount - 1);
+        float sum[3] = { 0.f, 0.f, 0.f };
+
+        // The outermost ring is always dark so the glow fades to nothing.
+        for (int j = 0; j < samples && i < ringCount - 1; j++) {
+            float x = -1.f + 2.f * (j + 0.5f) / samples;
+            float distance = std::abs(x);
+
+            // Bands go from widest to thinnest: the last one that still
+            // covers this distance is the one visible there.
+            ccColor3B color = bands.front().color;
+
+            for (const WaveBand& band : bands)
+                if (band.scale >= distance)
+                    color = band.color;
+
+            float weight = std::exp(-(offset - x) * (offset - x) / (2.f * sigma * sigma))
+                / (sigma * 2.5066283f) * (2.f / samples);
+
+            sum[0] += color.r * weight;
+            sum[1] += color.g * weight;
+            sum[2] += color.b * weight;
+        }
+
+        rings.push_back({
+            offset,
+            ccc3(
+                static_cast<GLubyte>(std::min(255.f, sum[0] * settings.gain)),
+                static_cast<GLubyte>(std::min(255.f, sum[1] * settings.gain)),
+                static_cast<GLubyte>(std::min(255.f, sum[2] * settings.gain))
+            )
+        });
     }
 
-    return bands;
+    return rings;
+}
+
+// Builds the glow for a trail running through `points` as triangles: strips
+// that follow the trail, one per gap between rings on each side, with mitred
+// corners so strips of neighbouring segments meet instead of overlapping
+// (overlaps would show up as bright spots). Both ends fade out lengthwise.
+void Utils::buildWaveGlowMesh(const std::vector<CCPoint>& trail, float halfWidth, const std::vector<WaveGlowRing>& rings, float opacity, std::vector<ccV2F_C4B_T2F>& out) {
+    if (trail.size() < 2 || rings.size() < 2 || halfWidth <= 0.f || opacity <= 0.f) return;
+
+    float reach = rings.back().offset * halfWidth;
+
+    std::vector<CCPoint> points;
+    std::vector<CCPoint> normals;
+    std::vector<float> fades;
+
+    auto direction = [](const CCPoint& from, const CCPoint& to) {
+        CCPoint delta = to - from;
+        float length = std::sqrt(delta.x * delta.x + delta.y * delta.y);
+
+        return length > 0.0001f ? CCPoint{ delta.x / length, delta.y / length } : CCPoint{ 1.f, 0.f };
+    };
+
+    CCPoint firstDir = direction(trail[0], trail[1]);
+    CCPoint lastDir = direction(trail[trail.size() - 2], trail.back());
+
+    points.push_back(trail.front() - firstDir * reach);
+    normals.push_back({ -firstDir.y, firstDir.x });
+    fades.push_back(0.f);
+
+    for (size_t i = 0; i < trail.size(); i++) {
+        CCPoint before = i == 0 ? firstDir : direction(trail[i - 1], trail[i]);
+        CCPoint after = i + 1 == trail.size() ? lastDir : direction(trail[i], trail[i + 1]);
+
+        CCPoint normalBefore = { -before.y, before.x };
+        CCPoint normalAfter = { -after.y, after.x };
+
+        CCPoint miter = normalBefore + normalAfter;
+        float length = std::sqrt(miter.x * miter.x + miter.y * miter.y);
+
+        if (length < 0.0001f)
+            miter = normalBefore;
+        else {
+            miter = { miter.x / length, miter.y / length };
+
+            // Stretch so the strip keeps its width through the corner, but
+            // not without limit on very sharp turns.
+            float cosine = std::max(0.34f, miter.x * normalBefore.x + miter.y * normalBefore.y);
+
+            miter = { miter.x / cosine, miter.y / cosine };
+        }
+
+        points.push_back(trail[i]);
+        normals.push_back(miter);
+        fades.push_back(1.f);
+    }
+
+    points.push_back(trail.back() + lastDir * reach);
+    normals.push_back({ -lastDir.y, lastDir.x });
+    fades.push_back(0.f);
+
+    auto vertex = [&](size_t point, size_t ring, float side) {
+        CCPoint pos = points[point] + normals[point] * (rings[ring].offset * halfWidth * side);
+        float strength = fades[point] * opacity;
+
+        ccV2F_C4B_T2F ret;
+
+        ret.vertices = { pos.x, pos.y };
+        ret.texCoords = { 0.f, 0.f };
+        ret.colors = ccc4(
+            static_cast<GLubyte>(rings[ring].color.r * strength),
+            static_cast<GLubyte>(rings[ring].color.g * strength),
+            static_cast<GLubyte>(rings[ring].color.b * strength),
+            255
+        );
+
+        return ret;
+    };
+
+    out.reserve(out.size() + (points.size() - 1) * (rings.size() - 1) * 12);
+
+    for (size_t i = 0; i + 1 < points.size(); i++)
+        for (size_t ring = 0; ring + 1 < rings.size(); ring++)
+            for (float side : { 1.f, -1.f }) {
+                ccV2F_C4B_T2F a = vertex(i, ring, side);
+                ccV2F_C4B_T2F b = vertex(i, ring + 1, side);
+                ccV2F_C4B_T2F c = vertex(i + 1, ring + 1, side);
+                ccV2F_C4B_T2F d = vertex(i + 1, ring, side);
+
+                out.push_back(a);
+                out.push_back(b);
+                out.push_back(c);
+
+                out.push_back(a);
+                out.push_back(c);
+                out.push_back(d);
+            }
+}
+
+// Bands and glow for the in-game trail. Empty bands mean the vanilla trail is
+// left alone.
+const WaveStyle& Utils::getWaveStyle(bool secondPlayer) {
+    static WaveStyle styles[2];
+
+    int index = secondPlayer ? 1 : 0;
+
+    if (s_waveStyleDirty[index]) {
+        s_waveStyleDirty[index] = false;
+
+        GradientConfig config = getSavedWaveConfig(secondPlayer);
+        std::vector<WaveBand> bands = computeWaveBands(config);
+
+        bool usesPlayerColor = config.isEmpty(
+            ColorType::Main,
+            secondPlayer && isSettingEnabled(P2_SEPARATE)
+        );
+
+        styles[index].glow = computeWaveGlow(bands, getWaveGlow(secondPlayer));
+        styles[index].bands = usesPlayerColor ? std::vector<WaveBand>{} : bands;
+    }
+
+    return styles[index];
 }
 
 // rectInPixels, when given, is the texture area the gradient spans. The
