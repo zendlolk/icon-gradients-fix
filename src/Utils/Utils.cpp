@@ -703,10 +703,10 @@ const std::vector<WaveNode>& Utils::getWaveProfile(bool secondPlayer) {
 // rectInPixels, when given, is the texture area the gradient spans. The
 // in-game bar grows by widening its texture rect, so without it the whole
 // gradient would be squeezed into the filled part.
-void Utils::applyBarGradient(CCSprite* sprite, GradientConfig config, bool inGame, const CCRect* rectInPixels, int id) {
+void Utils::applyBarGradient(CCSprite* sprite, GradientConfig config, bool inGame, const CCRect* rectInPixels, int shaderID) {
     // Always the bar's own shader, even without a gradient, so the glow
     // effects can change its brightness and saturation.
-    applyGradient(sprite, config, static_cast<IconType>(-2), ColorType::Main, id, false, false, inGame, 66, false, rectInPixels, false, false, true);
+    applyGradient(sprite, config, static_cast<IconType>(-2), ColorType::Main, shaderID, false, false, inGame, 66, false, rectInPixels, false, false, true);
 
     CCGLProgram* program = sprite->getShaderProgram();
 
