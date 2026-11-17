@@ -1588,8 +1588,8 @@ BarGlowEffects Utils::getBarGlowEffects() {
     effects.flashIntensity = number("flash-intensity", effects.flashIntensity, 0.f, 1.f);
     effects.flashExponential = saved["flash-exponential"].asBool().unwrapOr(effects.flashExponential);
     effects.flashPower = number("flash-power", effects.flashPower, 1.f, 6.f);
-    effects.flashDim = number("flash-dim", effects.flashDim, 0.f, 1.f);
-    effects.flashDesaturate = number("flash-desaturate", effects.flashDesaturate, 0.f, 1.f);
+    effects.flashBrighten = number("flash-brighten", effects.flashBrighten, 0.f, 1.f);
+    effects.flashSaturate = number("flash-saturate", effects.flashSaturate, 0.f, 1.f);
     effects.flashFromStartPos = saved["flash-start-pos"].asBool().unwrapOr(effects.flashFromStartPos);
     effects.startPosOffset = number("start-pos-offset", effects.startPosOffset, 0.f, 1.f);
 
@@ -1610,8 +1610,8 @@ void Utils::saveBarGlowEffects(const BarGlowEffects& effects) {
     saved["flash-intensity"] = effects.flashIntensity;
     saved["flash-exponential"] = effects.flashExponential;
     saved["flash-power"] = effects.flashPower;
-    saved["flash-dim"] = effects.flashDim;
-    saved["flash-desaturate"] = effects.flashDesaturate;
+    saved["flash-brighten"] = effects.flashBrighten;
+    saved["flash-saturate"] = effects.flashSaturate;
     saved["flash-start-pos"] = effects.flashFromStartPos;
     saved["start-pos-offset"] = effects.startPosOffset;
 
@@ -1639,8 +1639,9 @@ float Utils::getBarFlashRate(const BarGlowEffects& effects, float progress, floa
     return slowest + (fastest - slowest) * std::pow(along, effects.flashExponential ? effects.flashPower : 1.f);
 }
 
-// Brightness and saturation of the bar itself, each 0 to 1 of its own. Like
-// the glow, it only ever gets darker or greyer than the bar was set to.
+// Brightness and saturation of the bar itself, as multiples of its own (1 is
+// unchanged). Build-up only darkens and greys it; flashing brightens and
+// saturates it, up to double.
 std::pair<float, float> Utils::getBarLook(const BarGlowEffects& effects, float progress, float flashPhase, bool flashing) {
     float brightness = 1.f;
     float saturation = 1.f;
@@ -1655,11 +1656,12 @@ std::pair<float, float> Utils::getBarLook(const BarGlowEffects& effects, float p
     if (flashing) {
         float low = 0.5f - 0.5f * std::cos(flashPhase * 6.2831853f);
 
-        brightness *= 1.f - effects.flashDim * low;
-        saturation *= 1.f - effects.flashDesaturate * low;
+        // Starts each flash at rest, so it does not jump when flashing begins.
+        brightness *= 1.f + effects.flashBrighten * low;
+        saturation *= 1.f + effects.flashSaturate * low;
     }
 
-    return { std::clamp(brightness, 0.f, 1.f), std::clamp(saturation, 0.f, 1.f) };
+    return { std::clamp(brightness, 0.f, 2.f), std::clamp(saturation, 0.f, 2.f) };
 }
 
 void Utils::setBarFillLook(CCSprite* fill, float brightness, float saturation) {

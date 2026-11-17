@@ -22,7 +22,8 @@ uniform vec2 uvMax;
 // 1: no gradient, keep the sprite's own colour.
 uniform int u_tint;
 
-// Both 0 to 1; 1 leaves the bar as it is.
+// Multiples of the bar's own; 1 leaves it as it is. Above 1 brightens or
+// saturates it.
 uniform float u_brightness;
 uniform float u_saturation;
 
