@@ -16,6 +16,7 @@ private:
     CCMenuItemToggler* m_buildUpToggle = nullptr;
     CCMenuItemToggler* m_flashToggle = nullptr;
     CCMenuItemToggler* m_startPosToggle = nullptr;
+    CCMenuItemToggler* m_buildColourToggle = nullptr;
 
     // Switch between a straight line and a curve.
     CCMenuItemToggler* m_buildCurveToggle = nullptr;

@@ -186,11 +186,26 @@ bool BarGlowLayer::init() {
     m_buildCurveToggle = addCurveToggle("growth", 238, m_effects.buildExponential);
     m_buildPowerSlider = addSlider("steepness", 220, powerToSlider(m_effects.buildPower), m_buildPowerLabel, &m_buildCurveNodes);
     m_buildGraph = addGraph(232, m_buildCurveNodes);
-    CCLabelBMFont* colourHint = CCLabelBMFont::create("An empty bar starts in colour 2 (set with the 2 button on the bar page)", "chatFont.fnt");
-    colourHint->setScale(0.42f);
-    colourHint->setOpacity(150);
+    // Smaller than the section toggles, since it belongs to build-up.
+    m_buildColourToggle = CCMenuItemToggler::createWithStandardSprites(this, menu_selector(BarGlowLayer::onToggle), 0.38f);
+    m_buildColourToggle->setPosition({44, 202});
+    m_buildColourToggle->toggle(m_effects.buildColour);
+
+    m_buttonMenu->addChild(m_buildColourToggle);
+
+    CCLabelBMFont* colourLabel = CCLabelBMFont::create("start in colour 2", "bigFont.fnt");
+    colourLabel->setScale(0.27f);
+    colourLabel->setOpacity(170);
+    colourLabel->setAnchorPoint({0.f, 0.5f});
+    colourLabel->setPosition({55, 202});
+
+    m_mainLayer->addChild(colourLabel);
+
+    CCLabelBMFont* colourHint = CCLabelBMFont::create("(set it with the 2 button on the bar page)", "chatFont.fnt");
+    colourHint->setScale(0.4f);
+    colourHint->setOpacity(130);
     colourHint->setAnchorPoint({0.f, 0.5f});
-    colourHint->setPosition({38, 202});
+    colourHint->setPosition({150, 202});
 
     m_mainLayer->addChild(colourHint);
 
@@ -263,6 +278,7 @@ void BarGlowLayer::onToggle(CCObject* sender) {
     if (toggle == m_startPosToggle) m_effects.flashFromStartPos = on;
     if (toggle == m_buildCurveToggle) m_effects.buildExponential = on;
     if (toggle == m_flashCurveToggle) m_effects.flashExponential = on;
+    if (toggle == m_buildColourToggle) m_effects.buildColour = on;
 
     apply();
 }

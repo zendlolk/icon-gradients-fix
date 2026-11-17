@@ -67,6 +67,9 @@ struct BarGlowEffects {
     bool buildExponential = false;
     float buildPower = 2.f; // only when exponential: higher = later and steeper
 
+    // The bar starts in its second colour and blends to its first.
+    bool buildColour = false;
+
     // Glow pulses, faster the closer the bar is to full.
     bool flash = false;
     float flashStart = 0.8f; // progress (0 to 1) where it begins

@@ -1650,7 +1650,7 @@ void Utils::updateBarEffects(const BarSprites& bar, const BarGlowEffects& effect
     if (!bar.fill) return;
 
     if (mix < 0.f)
-        mix = effects.buildUp ? getBarBuild(effects, progress) : 1.f;
+        mix = effects.buildUp && effects.buildColour ? getBarBuild(effects, progress) : 1.f;
 
     float strength = getBarGlowStrength(effects, progress, flashCycles, flashing);
 
@@ -1691,6 +1691,7 @@ BarGlowEffects Utils::getBarGlowEffects() {
     effects.buildUp = saved["build-up"].asBool().unwrapOr(effects.buildUp);
     effects.buildExponential = saved["build-exponential"].asBool().unwrapOr(effects.buildExponential);
     effects.buildPower = number("build-power", effects.buildPower, 1.f, 6.f);
+    effects.buildColour = saved["build-colour"].asBool().unwrapOr(effects.buildColour);
     effects.flash = saved["flash"].asBool().unwrapOr(effects.flash);
     effects.flashStart = number("flash-start", effects.flashStart, 0.f, 1.f);
     effects.flashSpeed = number("flash-speed", effects.flashSpeed, 0.f, 1.f);
@@ -1711,6 +1712,7 @@ void Utils::saveBarGlowEffects(const BarGlowEffects& effects) {
     saved["build-up"] = effects.buildUp;
     saved["build-exponential"] = effects.buildExponential;
     saved["build-power"] = effects.buildPower;
+    saved["build-colour"] = effects.buildColour;
     saved["flash"] = effects.flash;
     saved["flash-start"] = effects.flashStart;
     saved["flash-speed"] = effects.flashSpeed;

@@ -57,7 +57,10 @@ void main() {
         color = texColor * gradientColor((v_texCoord - uvMin) / (uvMax - uvMin));
 
     // Opacity always applies, so the bar's second colour can fade over it.
-    color.a *= u_tint == 1 ? 1.0 : v_fragmentColor.a;
+    // Sprites are drawn premultiplied, so the colour fades with it; the
+    // sprite's own colour already has its opacity in it.
+    if (u_tint != 1)
+        color *= v_fragmentColor.a;
 
     float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
 
