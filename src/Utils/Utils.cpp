@@ -684,7 +684,24 @@ const std::vector<WaveNode>& Utils::getWaveProfile(bool secondPlayer) {
 // in-game bar grows by widening its texture rect, so without it the whole
 // gradient would be squeezed into the filled part.
 void Utils::applyBarGradient(CCSprite* sprite, GradientConfig config, bool inGame, const CCRect* rectInPixels) {
-    applyGradient(sprite, config, static_cast<IconType>(-2), ColorType::Main, 800, false, false, inGame, 66, false, rectInPixels);
+    // Always the bar's own shader, even without a gradient, so the glow
+    // effects can change its brightness and saturation.
+    applyGradient(sprite, config, static_cast<IconType>(-2), ColorType::Main, 800, false, false, inGame, 66, false, rectInPixels, false, false, true);
+
+    CCGLProgram* program = sprite->getShaderProgram();
+
+    if (!program) return;
+
+    GLuint id = program->getProgram();
+    GLint tint = glGetUniformLocation(id, "u_tint");
+
+    if (tint < 0) return;
+
+    program->use();
+
+    glUniform1i(tint, config.isEmpty(ColorType::Main, false) ? 1 : 0);
+    glUniform1f(glGetUniformLocation(id, "u_brightness"), 1.f);
+    glUniform1f(glGetUniformLocation(id, "u_saturation"), 1.f);
 }
 
 matjson::Value Utils::getSaveObject(GradientConfig config) {
@@ -1113,13 +1130,13 @@ void Utils::applyGradient(SimplePlayer* icon, GradientConfig config, ColorType c
         applyGradient(sprite3, config, iconType, colorType, id3, blend, secondPlayer, false, extra, colorType == ColorType::Line);
 }
 
-CCGLProgram* Utils::createShader(const std::string& key, bool linear, bool blend, bool line, bool glow) {
+CCGLProgram* Utils::createShader(const std::string& key, bool linear, bool blend, bool line, bool glow, bool bar) {
     CCShaderCache* cache = CCShaderCache::sharedShaderCache();
     CCGLProgram* program = cache->programForKey(key.c_str());
      
     if (!program || key.empty()) {
         static std::filesystem::path vertPath = Mod::get()->getResourcesDir() / "position.vert";
-        std::filesystem::path shaderPath = Mod::get()->getResourcesDir() / fmt::format("{}_gradient{}.fsh", linear ? "linear" : "radial", glow ? "_glow" : line ? "_line" : blend ? "_blend" : "");
+        std::filesystem::path shaderPath = Mod::get()->getResourcesDir() / fmt::format("{}_gradient{}.fsh", linear ? "linear" : "radial", glow ? "_glow" : bar ? "_bar" : line ? "_line" : blend ? "_blend" : "");
 
         if (!std::filesystem::exists(vertPath) || !std::filesystem::exists(shaderPath))
             return nullptr;
@@ -1150,11 +1167,11 @@ CCGLProgram* Utils::createShader(const std::string& key, bool linear, bool blend
     return program;
 }
 
-void Utils::applyGradient(CCSprite* sprite, GradientConfig config, IconType iconType, ColorType colorType, int id, bool blend, bool secondPlayer, bool playerObject, int extra, bool line, const CCRect* rectOverride, bool glow, bool rotatedOverride) {
+void Utils::applyGradient(CCSprite* sprite, GradientConfig config, IconType iconType, ColorType colorType, int id, bool blend, bool secondPlayer, bool playerObject, int extra, bool line, const CCRect* rectOverride, bool glow, bool rotatedOverride, bool bar) {
     if (!sprite) return;
     
     // A glow is drawn even for a plain colour.
-    if (!glow && config.isEmpty(colorType, secondPlayer))
+    if (!glow && !bar && config.isEmpty(colorType, secondPlayer))
         return sprite->setShaderProgram(
             CCShaderCache::sharedShaderCache()->programForKey(kCCShader_PositionTextureColor)
         );
@@ -1164,7 +1181,7 @@ void Utils::applyGradient(CCSprite* sprite, GradientConfig config, IconType icon
     if (extra != -4732) {
         std::string key = fmt::format(
             "{}-{}-{}-{}-{}-{}-{}-{}-{}"_spr,
-            glow,
+            glow ? 1 : bar ? 2 : 0,
             config.isLinear,
             static_cast<int>(iconType),
             id,
@@ -1175,9 +1192,9 @@ void Utils::applyGradient(CCSprite* sprite, GradientConfig config, IconType icon
             extra
         );
         
-        program = createShader(key, config.isLinear, blend, line, glow);
+        program = createShader(key, config.isLinear, blend, line, glow, bar);
     } else {
-        program = createShader("", config.isLinear, blend, line, glow);
+        program = createShader("", config.isLinear, blend, line, glow, bar);
     }
     
     if (!program) return;
@@ -1563,12 +1580,16 @@ BarGlowEffects Utils::getBarGlowEffects() {
     effects.buildUp = saved["build-up"].asBool().unwrapOr(effects.buildUp);
     effects.buildExponential = saved["build-exponential"].asBool().unwrapOr(effects.buildExponential);
     effects.buildPower = number("build-power", effects.buildPower, 1.f, 6.f);
+    effects.buildDim = number("build-dim", effects.buildDim, 0.f, 1.f);
+    effects.buildDesaturate = number("build-desaturate", effects.buildDesaturate, 0.f, 1.f);
     effects.flash = saved["flash"].asBool().unwrapOr(effects.flash);
     effects.flashStart = number("flash-start", effects.flashStart, 0.f, 1.f);
     effects.flashSpeed = number("flash-speed", effects.flashSpeed, 0.f, 1.f);
     effects.flashIntensity = number("flash-intensity", effects.flashIntensity, 0.f, 1.f);
     effects.flashExponential = saved["flash-exponential"].asBool().unwrapOr(effects.flashExponential);
     effects.flashPower = number("flash-power", effects.flashPower, 1.f, 6.f);
+    effects.flashDim = number("flash-dim", effects.flashDim, 0.f, 1.f);
+    effects.flashDesaturate = number("flash-desaturate", effects.flashDesaturate, 0.f, 1.f);
     effects.flashFromStartPos = saved["flash-start-pos"].asBool().unwrapOr(effects.flashFromStartPos);
     effects.startPosOffset = number("start-pos-offset", effects.startPosOffset, 0.f, 1.f);
 
@@ -1581,12 +1602,16 @@ void Utils::saveBarGlowEffects(const BarGlowEffects& effects) {
     saved["build-up"] = effects.buildUp;
     saved["build-exponential"] = effects.buildExponential;
     saved["build-power"] = effects.buildPower;
+    saved["build-dim"] = effects.buildDim;
+    saved["build-desaturate"] = effects.buildDesaturate;
     saved["flash"] = effects.flash;
     saved["flash-start"] = effects.flashStart;
     saved["flash-speed"] = effects.flashSpeed;
     saved["flash-intensity"] = effects.flashIntensity;
     saved["flash-exponential"] = effects.flashExponential;
     saved["flash-power"] = effects.flashPower;
+    saved["flash-dim"] = effects.flashDim;
+    saved["flash-desaturate"] = effects.flashDesaturate;
     saved["flash-start-pos"] = effects.flashFromStartPos;
     saved["start-pos-offset"] = effects.startPosOffset;
 
@@ -1612,6 +1637,48 @@ float Utils::getBarFlashRate(const BarGlowEffects& effects, float progress, floa
     float fastest = 2.f + effects.flashSpeed * 14.f;
 
     return slowest + (fastest - slowest) * std::pow(along, effects.flashExponential ? effects.flashPower : 1.f);
+}
+
+// Brightness and saturation of the bar itself, each 0 to 1 of its own. Like
+// the glow, it only ever gets darker or greyer than the bar was set to.
+std::pair<float, float> Utils::getBarLook(const BarGlowEffects& effects, float progress, float flashPhase, bool flashing) {
+    float brightness = 1.f;
+    float saturation = 1.f;
+
+    if (effects.buildUp) {
+        float built = std::pow(std::clamp(progress, 0.f, 1.f), effects.buildExponential ? effects.buildPower : 1.f);
+
+        brightness *= 1.f - effects.buildDim * (1.f - built);
+        saturation *= 1.f - effects.buildDesaturate * (1.f - built);
+    }
+
+    if (flashing) {
+        float low = 0.5f - 0.5f * std::cos(flashPhase * 6.2831853f);
+
+        brightness *= 1.f - effects.flashDim * low;
+        saturation *= 1.f - effects.flashDesaturate * low;
+    }
+
+    return { std::clamp(brightness, 0.f, 1.f), std::clamp(saturation, 0.f, 1.f) };
+}
+
+void Utils::setBarFillLook(CCSprite* fill, float brightness, float saturation) {
+    if (!fill) return;
+
+    CCGLProgram* program = fill->getShaderProgram();
+
+    if (!program) return;
+
+    GLuint id = program->getProgram();
+    GLint location = glGetUniformLocation(id, "u_brightness");
+
+    // Not the bar's shader.
+    if (location < 0) return;
+
+    program->use();
+
+    glUniform1f(location, brightness);
+    glUniform1f(glGetUniformLocation(id, "u_saturation"), saturation);
 }
 
 // Glow strength from 0 to 1 of what was set. A flash only ever dims the

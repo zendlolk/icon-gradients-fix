@@ -21,7 +21,7 @@ void ProPlayLayer::updateBarGradient(float dt) {
 
     // The glow has to follow the bar as it fills.
     if (f->m_barGradientApplied) {
-        if (!f->m_barGlow) return;
+        if (!f->m_barGlow && !f->m_barEffects.buildUp && !f->m_barEffects.flash) return;
 
         float progress = std::clamp(m_progressFill->getTextureRect().size.width / m_progressWidth, 0.f, 1.f);
 
@@ -42,6 +42,10 @@ void ProPlayLayer::updateBarGradient(float dt) {
             progress,
             Utils::getBarGlowStrength(f->m_barEffects, progress, f->m_flashPhase, rate > 0.f)
         );
+
+        auto [brightness, saturation] = Utils::getBarLook(f->m_barEffects, progress, f->m_flashPhase, rate > 0.f);
+
+        Utils::setBarFillLook(m_progressFill, brightness, saturation);
 
         return;
     }

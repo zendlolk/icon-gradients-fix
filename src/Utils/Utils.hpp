@@ -46,6 +46,8 @@ public:
     static void saveBarGlowEffects(const BarGlowEffects&);
     static float getBarFlashRate(const BarGlowEffects&, float, float, bool);
     static float getBarGlowStrength(const BarGlowEffects&, float, float, bool);
+    static std::pair<float, float> getBarLook(const BarGlowEffects&, float, float, bool);
+    static void setBarFillLook(CCSprite*, float, float);
     static float getWaveGlowReach(const GlowSettings&);
     static std::vector<WaveNode> computeWaveProfile(const GradientConfig&, const GlowSettings&);
     static const std::vector<WaveNode>& getWaveProfile(bool);
@@ -64,10 +66,10 @@ public:
     
     static void applyGradient(SimplePlayer*, Gradient, bool, bool, int);
     static void applyGradient(SimplePlayer*, GradientConfig, ColorType, bool, bool, int);
-    static void applyGradient(CCSprite*, GradientConfig, IconType, ColorType, int, bool, bool, bool, int, bool = false, const CCRect* = nullptr, bool = false, bool = false);
+    static void applyGradient(CCSprite*, GradientConfig, IconType, ColorType, int, bool, bool, bool, int, bool = false, const CCRect* = nullptr, bool = false, bool = false, bool = false);
     static void applyBarGradient(CCSprite*, GradientConfig, bool, const CCRect* = nullptr);
     
-    static CCGLProgram* createShader(const std::string&, bool, bool, bool, bool = false);
+    static CCGLProgram* createShader(const std::string&, bool, bool, bool, bool = false, bool = false);
     
     static void patchBatchNode(CCSpriteBatchNode*);
     static void hideSprite(CCSprite*);

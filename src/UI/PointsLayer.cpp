@@ -172,11 +172,12 @@ void PointsLayer::restartBarPreview(float from) {
     m_barFlashPhase = 0.f;
 }
 
-// The loop only plays when it is switched on and there is an effect to show.
+// The loop only plays when it is switched on and there is an effect to show,
+// on the glow or on the bar itself.
 bool PointsLayer::isBarPreviewPlaying() {
     return m_page == EditorPage::Bar
         && m_barPreviewEnabled
-        && m_barGlow && m_barGlow->isVisible()
+        && m_barFill
         && (m_barEffects.buildUp || m_barEffects.flash);
 }
 
@@ -207,12 +208,13 @@ bool PointsLayer::dragBarPreview(CCTouch* touch, bool begin) {
 }
 
 // Shows the preview bar filled to `progress` with its glow at `strength`.
-void PointsLayer::setBarPreviewFill(float progress, float strength) {
+void PointsLayer::setBarPreviewFill(float progress, float strength, float brightness, float saturation) {
     if (!m_barFill) return;
 
     m_barFill->setTextureRect({ 0.f, 0.f, m_barFullSize.width * progress, m_barFullSize.height });
 
     Utils::setBarGlowState(m_barGlow, progress, strength);
+    Utils::setBarFillLook(m_barFill, brightness, saturation);
 }
 
 // With glow effects on, the preview bar fills up on a loop so the build-up
@@ -250,7 +252,14 @@ void PointsLayer::updateBarPreview(float dt) {
     else
         m_barFlashPhase = 0.f;
 
-    setBarPreviewFill(progress, Utils::getBarGlowStrength(m_barEffects, progress, m_barFlashPhase, rate > 0.f));
+    auto [brightness, saturation] = Utils::getBarLook(m_barEffects, progress, m_barFlashPhase, rate > 0.f);
+
+    setBarPreviewFill(
+        progress,
+        Utils::getBarGlowStrength(m_barEffects, progress, m_barFlashPhase, rate > 0.f),
+        brightness,
+        saturation
+    );
 }
 
 // The rect gradient points are positioned relative to.

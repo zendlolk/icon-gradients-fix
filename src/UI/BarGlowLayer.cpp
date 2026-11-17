@@ -105,6 +105,36 @@ Slider* BarGlowLayer::addSlider(const char* text, float y, float value, CCLabelB
     return slider;
 }
 
+// Two small sliders on one row: how much the bar itself darkens, and how
+// much it loses its colour.
+void BarGlowLayer::addLookRow(float y, float dim, float desaturate, Slider*& dimSlider, Slider*& desaturateSlider, CCLabelBMFont*& dimLabel, CCLabelBMFont*& desaturateLabel) {
+    auto add = [&](const char* text, float x, float value, Slider*& slider, CCLabelBMFont*& valueLabel) {
+        CCLabelBMFont* label = CCLabelBMFont::create(text, "bigFont.fnt");
+        label->setScale(0.27f);
+        label->setOpacity(170);
+        label->setAnchorPoint({0.f, 0.5f});
+        label->setPosition({x, y});
+
+        m_mainLayer->addChild(label);
+
+        slider = Slider::create(this, menu_selector(BarGlowLayer::onSlider), 0.3f);
+        slider->setPosition({x + 82.f, y});
+        slider->setValue(std::clamp(value, 0.f, 1.f));
+
+        m_mainLayer->addChild(slider);
+
+        valueLabel = CCLabelBMFont::create("", "bigFont.fnt");
+        valueLabel->setScale(0.25f);
+        valueLabel->setAnchorPoint({0.f, 0.5f});
+        valueLabel->setPosition({x + 118.f, y});
+
+        m_mainLayer->addChild(valueLabel);
+    };
+
+    add("darken", 38.f, dim, dimSlider, dimLabel);
+    add("grey", 196.f, desaturate, desaturateSlider, desaturateLabel);
+}
+
 // A small box showing the shape of a curve, centred on `y`.
 CCDrawNode* BarGlowLayer::addGraph(float y, std::vector<CCNode*>& group) {
     NineSlice* bg = NineSlice::create("square02b_001.png");
@@ -147,32 +177,34 @@ void BarGlowLayer::drawGraph(CCDrawNode* graph, float power) {
 }
 
 bool BarGlowLayer::init() {
-    Popup::init(380, 284);
+    Popup::init(380, 300);
 
     setTitle("Progress Bar Glow");
 
     m_effects = Utils::getBarGlowEffects();
 
-    m_buildUpToggle = addToggle("Build up as the bar fills", 240, m_effects.buildUp);
-    m_buildCurveToggle = addCurveToggle("growth", 220, m_effects.buildExponential);
-    m_buildPowerSlider = addSlider("steepness", 200, powerToSlider(m_effects.buildPower), m_buildPowerLabel, &m_buildCurveNodes);
-    m_buildGraph = addGraph(218, m_buildCurveNodes);
+    m_buildUpToggle = addToggle("Build up as the bar fills", 256, m_effects.buildUp);
+    m_buildCurveToggle = addCurveToggle("growth", 238, m_effects.buildExponential);
+    m_buildPowerSlider = addSlider("steepness", 220, powerToSlider(m_effects.buildPower), m_buildPowerLabel, &m_buildCurveNodes);
+    m_buildGraph = addGraph(232, m_buildCurveNodes);
+    addLookRow(202, m_effects.buildDim, m_effects.buildDesaturate, m_buildDimSlider, m_buildDesaturateSlider, m_buildDimLabel, m_buildDesaturateLabel);
 
-    m_flashToggle = addToggle("Flash", 174, m_effects.flash);
-    m_flashStartSlider = addSlider("starts at", 154, m_effects.flashStart, m_flashStartLabel);
-    m_flashSpeedSlider = addSlider("speed", 134, m_effects.flashSpeed, m_flashSpeedLabel);
-    m_flashIntensitySlider = addSlider("intensity", 114, m_effects.flashIntensity, m_flashIntensityLabel);
-    m_flashCurveToggle = addCurveToggle("speed-up", 94, m_effects.flashExponential);
-    m_flashPowerSlider = addSlider("steepness", 74, powerToSlider(m_effects.flashPower), m_flashPowerLabel, &m_flashCurveNodes);
-    m_flashGraph = addGraph(92, m_flashCurveNodes);
+    m_flashToggle = addToggle("Flash", 180, m_effects.flash);
+    m_flashStartSlider = addSlider("starts at", 162, m_effects.flashStart, m_flashStartLabel);
+    m_flashSpeedSlider = addSlider("speed", 144, m_effects.flashSpeed, m_flashSpeedLabel);
+    m_flashIntensitySlider = addSlider("intensity", 126, m_effects.flashIntensity, m_flashIntensityLabel);
+    m_flashCurveToggle = addCurveToggle("speed-up", 108, m_effects.flashExponential);
+    m_flashPowerSlider = addSlider("steepness", 90, powerToSlider(m_effects.flashPower), m_flashPowerLabel, &m_flashCurveNodes);
+    m_flashGraph = addGraph(110, m_flashCurveNodes);
+    addLookRow(72, m_effects.flashDim, m_effects.flashDesaturate, m_flashDimSlider, m_flashDesaturateSlider, m_flashDimLabel, m_flashDesaturateLabel);
 
-    m_startPosToggle = addToggle("Flash from start positions", 48, m_effects.flashFromStartPos);
-    m_startPosOffsetSlider = addSlider("starts after", 28, m_effects.startPosOffset, m_startPosOffsetLabel);
+    m_startPosToggle = addToggle("Flash from start positions", 50, m_effects.flashFromStartPos);
+    m_startPosOffsetSlider = addSlider("starts after", 32, m_effects.startPosOffset, m_startPosOffsetLabel);
 
     CCLabelBMFont* hint = CCLabelBMFont::create("of the level, counted from the start position", "chatFont.fnt");
     hint->setScale(0.45f);
     hint->setOpacity(150);
-    hint->setPosition({190, 13});
+    hint->setPosition({190, 16});
 
     m_mainLayer->addChild(hint);
 
@@ -188,6 +220,10 @@ void BarGlowLayer::updateLabels() {
     m_flashIntensityLabel->setString(percentText(m_effects.flashIntensity).c_str());
     m_flashPowerLabel->setString(fmt::format("{:.1f}", m_effects.flashPower).c_str());
     m_startPosOffsetLabel->setString(percentText(m_effects.startPosOffset).c_str());
+    m_buildDimLabel->setString(percentText(m_effects.buildDim).c_str());
+    m_buildDesaturateLabel->setString(percentText(m_effects.buildDesaturate).c_str());
+    m_flashDimLabel->setString(percentText(m_effects.flashDim).c_str());
+    m_flashDesaturateLabel->setString(percentText(m_effects.flashDesaturate).c_str());
 
     // The curve settings only appear once a curve is chosen.
     for (CCNode* node : m_buildCurveNodes)
@@ -231,6 +267,10 @@ void BarGlowLayer::onSlider(CCObject*) {
     m_effects.flashIntensity = std::clamp(m_flashIntensitySlider->getValue(), 0.f, 1.f);
     m_effects.flashPower = sliderToPower(m_flashPowerSlider->getValue());
     m_effects.startPosOffset = std::clamp(m_startPosOffsetSlider->getValue(), 0.f, 1.f);
+    m_effects.buildDim = std::clamp(m_buildDimSlider->getValue(), 0.f, 1.f);
+    m_effects.buildDesaturate = std::clamp(m_buildDesaturateSlider->getValue(), 0.f, 1.f);
+    m_effects.flashDim = std::clamp(m_flashDimSlider->getValue(), 0.f, 1.f);
+    m_effects.flashDesaturate = std::clamp(m_flashDesaturateSlider->getValue(), 0.f, 1.f);
 
     apply();
 }

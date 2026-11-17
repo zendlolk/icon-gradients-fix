@@ -68,7 +68,7 @@ private:
     void createWave();
 
     void updateBarPreview(float);
-    void setBarPreviewFill(float, float);
+    void setBarPreviewFill(float, float, float = 1.f, float = 1.f);
 
     bool isBarPreviewPlaying();
     bool dragBarPreview(CCTouch*, bool);

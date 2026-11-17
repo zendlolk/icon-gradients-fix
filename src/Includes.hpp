@@ -67,6 +67,11 @@ struct BarGlowEffects {
     bool buildExponential = false;
     float buildPower = 2.f; // only when exponential: higher = later and steeper
 
+    // How much darker and greyer the bar itself starts, reaching its own
+    // colours when full. 0 to 1.
+    float buildDim = 0.f;
+    float buildDesaturate = 0.f;
+
     // Glow pulses, faster the closer the bar is to full.
     bool flash = false;
     float flashStart = 0.8f; // progress (0 to 1) where it begins
@@ -74,6 +79,11 @@ struct BarGlowEffects {
     float flashIntensity = 0.7f; // 0 to 1, how far each flash dims the glow
     bool flashExponential = false;
     float flashPower = 2.f; // only when exponential: how late the pace picks up
+
+    // How much darker and greyer the bar itself gets at the low point of
+    // each flash. 0 to 1.
+    float flashDim = 0.f;
+    float flashDesaturate = 0.f;
 
     // From a start position: whether to flash at all, and how much of the
     // level has to be played first.

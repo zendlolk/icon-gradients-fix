@@ -35,6 +35,17 @@ private:
     CCLabelBMFont* m_flashPowerLabel = nullptr;
     CCLabelBMFont* m_startPosOffsetLabel = nullptr;
 
+    // How much the bar itself darkens and greys, for build-up and flashing.
+    Slider* m_buildDimSlider = nullptr;
+    Slider* m_buildDesaturateSlider = nullptr;
+    Slider* m_flashDimSlider = nullptr;
+    Slider* m_flashDesaturateSlider = nullptr;
+
+    CCLabelBMFont* m_buildDimLabel = nullptr;
+    CCLabelBMFont* m_buildDesaturateLabel = nullptr;
+    CCLabelBMFont* m_flashDimLabel = nullptr;
+    CCLabelBMFont* m_flashDesaturateLabel = nullptr;
+
     CCDrawNode* m_buildGraph = nullptr;
     CCDrawNode* m_flashGraph = nullptr;
 
@@ -48,6 +59,7 @@ private:
     CCMenuItemToggler* addCurveToggle(const char*, float, bool);
     Slider* addSlider(const char*, float, float, CCLabelBMFont*&, std::vector<CCNode*>* = nullptr);
     CCDrawNode* addGraph(float, std::vector<CCNode*>&);
+    void addLookRow(float, float, float, Slider*&, Slider*&, CCLabelBMFont*&, CCLabelBMFont*&);
 
     void drawGraph(CCDrawNode*, float);
 
