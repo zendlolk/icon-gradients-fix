@@ -333,7 +333,7 @@ GradientLayer* GradientLayer::create() {
 // progress bar, or the wave trail.
 GradientConfig GradientLayer::getEditedConfig() {
     if (m_page == EditorPage::Bar)
-        return Utils::getSavedBarConfig();
+        return m_currentColor == ColorType::Secondary ? Utils::getSavedBarConfig2() : Utils::getSavedBarConfig();
 
     if (m_page == EditorPage::Wave)
         return Utils::getSavedWaveConfig(m_isSecondPlayer);
@@ -380,8 +380,24 @@ void GradientLayer::onPageToggle(CCObject* sender) {
     // Everything that only makes sense for icons.
     m_sidebarBg->setVisible(!m_extraPage);
     m_dotToggle->setVisible(!m_extraPage);
-    m_mainColorToggle->setVisible(!m_extraPage);
-    m_secondaryColorToggle->setVisible(!m_extraPage);
+    // The progress bar has two colours of its own, chosen with the same 1
+    // and 2 buttons as an icon's.
+    m_mainColorToggle->setVisible(!m_extraPage || m_page == EditorPage::Bar);
+    m_secondaryColorToggle->setVisible(!m_extraPage || m_page == EditorPage::Bar);
+
+    if (
+        m_page == EditorPage::Bar
+        && m_currentColor != ColorType::Main
+        && m_currentColor != ColorType::Secondary
+    ) {
+        m_glowColorToggle->setSelected(false);
+        m_whiteColorToggle->setSelected(false);
+        m_lineColorToggle->setSelected(false);
+        m_secondaryColorToggle->setSelected(false);
+        m_mainColorToggle->setSelected(true);
+
+        m_currentColor = ColorType::Main;
+    }
     m_glowColorToggle->setVisible(!m_extraPage);
     m_whiteColorToggle->setVisible(!m_extraPage);
     m_lineColorToggle->setVisible(!m_extraPage);
@@ -410,8 +426,14 @@ void GradientLayer::updateGradient(bool force, bool all, bool transition) {
 
     updateGarage();
 
-    if (m_extraPage)
-        return m_pointsLayer->updateGradient(m_currentConfig, ColorType::Main, force);
+    if (m_extraPage) {
+        if (m_page == EditorPage::Bar) {
+            m_mainColorToggle->applyGradient(Utils::getSavedBarConfig(), force, transition);
+            m_secondaryColorToggle->applyGradient(Utils::getSavedBarConfig2(), force, transition);
+        }
+
+        return m_pointsLayer->updateGradient(m_currentConfig, m_currentColor, force);
+    }
 
     Gradient gradient = Utils::getGradient(m_selectedButton->getType(), m_isSecondPlayer);
 
@@ -602,7 +624,7 @@ void GradientLayer::save() {
 
 void GradientLayer::save(GradientConfig config, ColorType colorType) {
     if (m_page == EditorPage::Bar)
-        return Utils::saveBarConfig(config);
+        return m_currentColor == ColorType::Secondary ? Utils::saveBarConfig2(config) : Utils::saveBarConfig(config);
 
     if (m_page == EditorPage::Wave)
         return Utils::saveWaveConfig(config, m_isSecondPlayer);
@@ -698,7 +720,9 @@ void GradientLayer::onLockToggle(CCObject* sender) {
 void GradientLayer::onColorToggle(CCObject* sender) {
     ColorToggle* toggle = static_cast<ColorToggle*>(sender);
     
-    if (m_extraPage || !toggle->isEnabled()) return;
+    bool barColor = m_page == EditorPage::Bar && (toggle == m_mainColorToggle || toggle == m_secondaryColorToggle);
+
+    if ((m_extraPage && !barColor) || !toggle->isEnabled()) return;
     
     if (toggle == m_mainColorToggle && m_mainColorToggle->isSelected()) return;
     if (toggle == m_secondaryColorToggle && m_secondaryColorToggle->isSelected()) return;
@@ -1191,7 +1215,7 @@ bool GradientLayer::init() {
     // Controls for the progress bar's preview loop, where the icon colour
     // slots are on the first page.
     m_barPreviewToggle = CCMenuItemToggler::createWithStandardSprites(this, menu_selector(GradientLayer::onBarPreviewToggle), 0.4f);
-    m_barPreviewToggle->setPosition({232, 66});
+    m_barPreviewToggle->setPosition({226, 41});
     m_barPreviewToggle->toggle(Mod::get()->getSavedValue<bool>("bar-preview", true));
 
     m_buttonMenu->addChild(m_barPreviewToggle);
@@ -1200,7 +1224,7 @@ bool GradientLayer::init() {
     lbl = CCLabelBMFont::create("preview", "bigFont.fnt");
     lbl->setScale(0.27f);
     lbl->setAnchorPoint({0.f, 0.5f});
-    lbl->setPosition({243, 66});
+    lbl->setPosition({236, 41});
 
     m_mainLayer->addChild(lbl);
     m_barPreviewNodes.push_back(lbl);
@@ -1208,13 +1232,13 @@ bool GradientLayer::init() {
     lbl = CCLabelBMFont::create("speed", "bigFont.fnt");
     lbl->setScale(0.2f);
     lbl->setOpacity(140);
-    lbl->setPosition({233, 48});
+    lbl->setPosition({224, 28});
 
     m_mainLayer->addChild(lbl);
     m_barPreviewNodes.push_back(lbl);
 
-    m_barPreviewSlider = Slider::create(this, menu_selector(GradientLayer::onBarPreviewSlider), 0.28f);
-    m_barPreviewSlider->setPosition({275, 48});
+    m_barPreviewSlider = Slider::create(this, menu_selector(GradientLayer::onBarPreviewSlider), 0.24f);
+    m_barPreviewSlider->setPosition({266, 28});
     m_barPreviewSlider->setValue(std::clamp(static_cast<float>(Mod::get()->getSavedValue<double>("bar-preview-speed", 0.5)), 0.f, 1.f));
 
     m_mainLayer->addChild(m_barPreviewSlider);
@@ -1223,14 +1247,14 @@ bool GradientLayer::init() {
     lbl = CCLabelBMFont::create("from", "bigFont.fnt");
     lbl->setScale(0.2f);
     lbl->setOpacity(140);
-    lbl->setPosition({232, 28});
+    lbl->setPosition({229, 15});
 
     m_mainLayer->addChild(lbl);
     m_barPreviewNodes.push_back(lbl);
 
     m_barPreviewInput = TextInput::create(50, "0");
-    m_barPreviewInput->setScale(0.5f);
-    m_barPreviewInput->setPosition({259, 28});
+    m_barPreviewInput->setScale(0.45f);
+    m_barPreviewInput->setPosition({252, 15});
     m_barPreviewInput->setString(std::to_string(std::clamp(Mod::get()->getSavedValue<int>("bar-preview-from", 0), 0, 99)).c_str());
     m_barPreviewInput->getInputNode()->setAllowedChars("0123456789");
     m_barPreviewInput->getInputNode()->setMaxLabelLength(2);
@@ -1241,7 +1265,7 @@ bool GradientLayer::init() {
     lbl = CCLabelBMFont::create("%", "bigFont.fnt");
     lbl->setScale(0.2f);
     lbl->setOpacity(140);
-    lbl->setPosition({277, 28});
+    lbl->setPosition({268, 15});
 
     m_mainLayer->addChild(lbl);
     m_barPreviewNodes.push_back(lbl);
@@ -1251,7 +1275,7 @@ bool GradientLayer::init() {
     spr->setScale(0.3f);
 
     CCMenuItemSpriteExtra* previewStart = CCMenuItemSpriteExtra::create(spr, this, menu_selector(GradientLayer::onBarPreviewStart));
-    previewStart->setPosition({294, 28});
+    previewStart->setPosition({285, 15});
 
     m_buttonMenu->addChild(previewStart);
     m_barPreviewNodes.push_back(previewStart);

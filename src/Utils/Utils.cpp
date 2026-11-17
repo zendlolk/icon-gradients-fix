@@ -181,6 +181,26 @@ GradientConfig Utils::getDefaultBarConfig() {
     };
 }
 
+// The bar's second colour, which an empty bar starts in when it builds up.
+// Until it has been set, it is the same as the first.
+GradientConfig Utils::getSavedBarConfig2() {
+    if (Mod::get()->hasSavedValue("progress-bar")) {
+        matjson::Value container = Mod::get()->getSavedValue<matjson::Value>("progress-bar");
+
+        if (container.contains("bar2"))
+            return configFromObject(container["bar2"]);
+    }
+
+    return getSavedBarConfig();
+}
+
+void Utils::saveBarConfig2(GradientConfig config) {
+    for (SimplePoint& point : config.points)
+        point.pos.y = 0.5f;
+
+    saveConfig(config, "progress-bar", "bar2");
+}
+
 GradientConfig Utils::getSavedBarConfig() {
     if (!Mod::get()->hasSavedValue("progress-bar"))
         return getDefaultBarConfig();
@@ -683,10 +703,10 @@ const std::vector<WaveNode>& Utils::getWaveProfile(bool secondPlayer) {
 // rectInPixels, when given, is the texture area the gradient spans. The
 // in-game bar grows by widening its texture rect, so without it the whole
 // gradient would be squeezed into the filled part.
-void Utils::applyBarGradient(CCSprite* sprite, GradientConfig config, bool inGame, const CCRect* rectInPixels) {
+void Utils::applyBarGradient(CCSprite* sprite, GradientConfig config, bool inGame, const CCRect* rectInPixels, int id) {
     // Always the bar's own shader, even without a gradient, so the glow
     // effects can change its brightness and saturation.
-    applyGradient(sprite, config, static_cast<IconType>(-2), ColorType::Main, 800, false, false, inGame, 66, false, rectInPixels, false, false, true);
+    applyGradient(sprite, config, static_cast<IconType>(-2), ColorType::Main, id, false, false, inGame, 66, false, rectInPixels, false, false, true);
 
     CCGLProgram* program = sprite->getShaderProgram();
 
@@ -1371,6 +1391,8 @@ static CCGLProgram* setGlowUniforms(CCSprite* glow, const GlowSettings& settings
     glUniform3fv(glGetUniformLocation(id, "u_taps"), 36, taps.data());
     glUniform1f(glGetUniformLocation(id, "u_gain"), settings.gain * 1.6f);
     glUniform1f(glGetUniformLocation(id, "u_strength"), 1.f);
+    glUniform1f(glGetUniformLocation(id, "u_brightness"), 1.f);
+    glUniform1f(glGetUniformLocation(id, "u_saturation"), 1.f);
     // Light added on top of the sprite itself. It has a ceiling, so a high
     // gain strengthens the glow around the sprite without washing the sprite
     // out. A bigger glow is allowed a little more.
@@ -1487,7 +1509,7 @@ CCSprite* Utils::updateSpriteGlow(CCSprite* real, GradientConfig config, IconTyp
 // Glow for a progress bar's fill sprite. `fullRect` is the texture rect of
 // the completely filled bar, in points. The fill itself changes every frame,
 // which setBarGlowState follows.
-CCSprite* Utils::updateBarGlow(CCSprite* fill, const CCRect& fullRect, GradientConfig config, bool inGame, const GlowSettings& settings) {
+CCSprite* Utils::updateBarGlow(CCSprite* fill, const CCRect& fullRect, GradientConfig config, bool inGame, const GlowSettings& settings, int id) {
     if (!fill) return nullptr;
 
     CCSprite* glow = getGlowSprite(fill, settings.enabled);
@@ -1530,7 +1552,7 @@ CCSprite* Utils::updateBarGlow(CCSprite* fill, const CCRect& fullRect, GradientC
     glow->setPosition({-pad, -pad});
     glow->setVisible(true);
 
-    applyGradient(glow, config, static_cast<IconType>(-2), ColorType::Main, 801, false, false, inGame, 66, false, &fullRectPixels, true, false);
+    applyGradient(glow, config, static_cast<IconType>(-2), ColorType::Main, id, false, false, inGame, 66, false, &fullRectPixels, true, false);
 
     // Mostly outwards: very little of it shows on the bar itself.
     CCGLProgram* program = setGlowUniforms(glow, settings, 0.04f, 0.08f);
@@ -1552,7 +1574,7 @@ CCSprite* Utils::updateBarGlow(CCSprite* fill, const CCRect& fullRect, GradientC
 
 // Follows the bar while playing: how much of it is filled (0 to 1), and how
 // strong the glow is right now (0 to 1 of what was set).
-void Utils::setBarGlowState(CCSprite* glow, float fill, float strength) {
+void Utils::setBarGlowState(CCSprite* glow, float fill, float strength, float brightness, float saturation) {
     if (!glow || !glow->isVisible()) return;
 
     CCGLProgram* program = glow->getShaderProgram();
@@ -1561,8 +1583,97 @@ void Utils::setBarGlowState(CCSprite* glow, float fill, float strength) {
 
     program->use();
 
-    glUniform1f(glGetUniformLocation(program->getProgram(), "u_fill"), std::clamp(fill, 0.f, 1.f));
-    glUniform1f(glGetUniformLocation(program->getProgram(), "u_strength"), std::clamp(strength, 0.f, 1.f));
+    GLuint id = program->getProgram();
+
+    glUniform1f(glGetUniformLocation(id, "u_fill"), std::clamp(fill, 0.f, 1.f));
+    glUniform1f(glGetUniformLocation(id, "u_strength"), std::clamp(strength, 0.f, 1.f));
+    glUniform1f(glGetUniformLocation(id, "u_brightness"), brightness);
+    glUniform1f(glGetUniformLocation(id, "u_saturation"), saturation);
+}
+
+// Sets up a progress bar's fill with both of its colours and their glows.
+// `fullRect` is the texture rect of the completely filled bar, in points.
+void Utils::setupBar(BarSprites& bar, CCSprite* fill, const CCRect& fullRect, bool inGame) {
+    bar = BarSprites{};
+
+    if (!fill) return;
+
+    float scale = CCDirector::get()->getContentScaleFactor();
+
+    CCRect fullRectPixels = CCRect(
+        fullRect.origin.x * scale,
+        fullRect.origin.y * scale,
+        fullRect.size.width * scale,
+        fullRect.size.height * scale
+    );
+
+    GradientConfig primary = getSavedBarConfig();
+    GradientConfig secondary = getSavedBarConfig2();
+    GlowSettings glow = getGlow(GlowTarget::Bar, false);
+
+    applyBarGradient(fill, primary, inGame, &fullRectPixels, 800);
+
+    // A copy of the fill on top of it, in the second colour. Fading it out
+    // blends the bar from the second colour to the first.
+    CCSprite* overlay = typeinfo_cast<CCSprite*>(fill->getChildByID("bar-secondary"_spr));
+
+    if (!overlay) {
+        overlay = CCSprite::createWithTexture(fill->getTexture());
+        overlay->setID("bar-secondary"_spr);
+        overlay->setAnchorPoint({0.f, 0.f});
+
+        fill->addChild(overlay, 1);
+    }
+
+    overlay->setTextureRect(fill->getTextureRect());
+    overlay->setPosition({0.f, 0.f});
+    overlay->setColor(fill->getColor());
+    overlay->setVisible(false);
+
+    applyBarGradient(overlay, secondary, inGame, &fullRectPixels, 802);
+
+    bar.fill = fill;
+    bar.overlay = overlay;
+    bar.glow = updateBarGlow(fill, fullRect, primary, inGame, glow, 801);
+    bar.overlayGlow = updateBarGlow(overlay, fullRect, secondary, inGame, glow, 803);
+}
+
+// How far the build-up has got: 0 for an empty bar, 1 for a full one.
+float Utils::getBarBuild(const BarGlowEffects& effects, float progress) {
+    return std::pow(std::clamp(progress, 0.f, 1.f), effects.buildExponential ? effects.buildPower : 1.f);
+}
+
+// Puts a bar and its glows in the state for this point of the level.
+// `mix` is how far it is from the second colour (0) to the first (1); left
+// out, it follows the build-up.
+void Utils::updateBarEffects(const BarSprites& bar, const BarGlowEffects& effects, float progress, float flashCycles, bool flashing, float mix) {
+    if (!bar.fill) return;
+
+    if (mix < 0.f)
+        mix = effects.buildUp ? getBarBuild(effects, progress) : 1.f;
+
+    float strength = getBarGlowStrength(effects, progress, flashCycles, flashing);
+
+    auto [brightness, saturation] = getBarLook(effects, flashCycles, flashing);
+
+    setBarFillLook(bar.fill, brightness, saturation);
+
+    if (bar.overlay) {
+        bool shown = mix < 0.999f;
+
+        bar.overlay->setVisible(shown);
+
+        if (shown) {
+            bar.overlay->setTextureRect(bar.fill->getTextureRect());
+            bar.overlay->setOpacity(static_cast<GLubyte>((1.f - mix) * 255.f));
+
+            setBarFillLook(bar.overlay, brightness, saturation);
+        }
+    }
+
+    // Each glow in its own colour, together as strong as one.
+    setBarGlowState(bar.glow, progress, strength * mix, brightness, saturation);
+    setBarGlowState(bar.overlayGlow, progress, strength * (1.f - mix), brightness, saturation);
 }
 
 BarGlowEffects Utils::getBarGlowEffects() {
@@ -1580,8 +1691,6 @@ BarGlowEffects Utils::getBarGlowEffects() {
     effects.buildUp = saved["build-up"].asBool().unwrapOr(effects.buildUp);
     effects.buildExponential = saved["build-exponential"].asBool().unwrapOr(effects.buildExponential);
     effects.buildPower = number("build-power", effects.buildPower, 1.f, 6.f);
-    effects.buildDim = number("build-dim", effects.buildDim, 0.f, 1.f);
-    effects.buildDesaturate = number("build-desaturate", effects.buildDesaturate, 0.f, 1.f);
     effects.flash = saved["flash"].asBool().unwrapOr(effects.flash);
     effects.flashStart = number("flash-start", effects.flashStart, 0.f, 1.f);
     effects.flashSpeed = number("flash-speed", effects.flashSpeed, 0.f, 1.f);
@@ -1602,8 +1711,6 @@ void Utils::saveBarGlowEffects(const BarGlowEffects& effects) {
     saved["build-up"] = effects.buildUp;
     saved["build-exponential"] = effects.buildExponential;
     saved["build-power"] = effects.buildPower;
-    saved["build-dim"] = effects.buildDim;
-    saved["build-desaturate"] = effects.buildDesaturate;
     saved["flash"] = effects.flash;
     saved["flash-start"] = effects.flashStart;
     saved["flash-speed"] = effects.flashSpeed;
@@ -1639,29 +1746,18 @@ float Utils::getBarFlashRate(const BarGlowEffects& effects, float progress, floa
     return slowest + (fastest - slowest) * std::pow(along, effects.flashExponential ? effects.flashPower : 1.f);
 }
 
-// Brightness and saturation of the bar itself, as multiples of its own (1 is
-// unchanged). Build-up only darkens and greys it; flashing brightens and
-// saturates it, up to double.
-std::pair<float, float> Utils::getBarLook(const BarGlowEffects& effects, float progress, float flashPhase, bool flashing) {
-    float brightness = 1.f;
-    float saturation = 1.f;
+// Brightness and saturation of the bar and its glow, as multiples of their
+// own (1 is unchanged). Flashing lifts them, up to double.
+std::pair<float, float> Utils::getBarLook(const BarGlowEffects& effects, float flashCycles, bool flashing) {
+    if (!flashing) return { 1.f, 1.f };
 
-    if (effects.buildUp) {
-        float built = std::pow(std::clamp(progress, 0.f, 1.f), effects.buildExponential ? effects.buildPower : 1.f);
+    // Starts each run of flashes at rest, so it does not jump when they begin.
+    float peak = 0.5f - 0.5f * std::cos(flashCycles * 6.2831853f);
 
-        brightness *= 1.f - effects.buildDim * (1.f - built);
-        saturation *= 1.f - effects.buildDesaturate * (1.f - built);
-    }
-
-    if (flashing) {
-        float low = 0.5f - 0.5f * std::cos(flashPhase * 6.2831853f);
-
-        // Starts each flash at rest, so it does not jump when flashing begins.
-        brightness *= 1.f + effects.flashBrighten * low;
-        saturation *= 1.f + effects.flashSaturate * low;
-    }
-
-    return { std::clamp(brightness, 0.f, 2.f), std::clamp(saturation, 0.f, 2.f) };
+    return {
+        std::clamp(1.f + effects.flashBrighten * peak, 0.f, 2.f),
+        std::clamp(1.f + effects.flashSaturate * peak, 0.f, 2.f)
+    };
 }
 
 void Utils::setBarFillLook(CCSprite* fill, float brightness, float saturation) {
@@ -1685,14 +1781,18 @@ void Utils::setBarFillLook(CCSprite* fill, float brightness, float saturation) {
 
 // Glow strength from 0 to 1 of what was set. A flash only ever dims the
 // glow, so its peak is never brighter than the setting.
-float Utils::getBarGlowStrength(const BarGlowEffects& effects, float progress, float flashPhase, bool flashing) {
-    float strength = 1.f;
+float Utils::getBarGlowStrength(const BarGlowEffects& effects, float progress, float flashCycles, bool flashing) {
+    float strength = effects.buildUp ? getBarBuild(effects, progress) : 1.f;
 
-    if (effects.buildUp)
-        strength = std::pow(std::clamp(progress, 0.f, 1.f), effects.buildExponential ? effects.buildPower : 1.f);
+    if (flashing) {
+        // In step with the bar: the glow is full when the bar is brightest
+        // and dims in between. Eased in over the first flash so the glow
+        // does not drop the moment flashing begins.
+        float peak = 0.5f - 0.5f * std::cos(flashCycles * 6.2831853f);
+        float ease = std::clamp(flashCycles, 0.f, 1.f);
 
-    if (flashing)
-        strength *= 1.f - effects.flashIntensity * (0.5f - 0.5f * std::cos(flashPhase * 6.2831853f));
+        strength *= 1.f - effects.flashIntensity * ease * (1.f - peak);
+    }
 
     return strength;
 }

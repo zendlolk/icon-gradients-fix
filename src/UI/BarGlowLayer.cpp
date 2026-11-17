@@ -186,11 +186,13 @@ bool BarGlowLayer::init() {
     m_buildCurveToggle = addCurveToggle("growth", 238, m_effects.buildExponential);
     m_buildPowerSlider = addSlider("steepness", 220, powerToSlider(m_effects.buildPower), m_buildPowerLabel, &m_buildCurveNodes);
     m_buildGraph = addGraph(232, m_buildCurveNodes);
-    addLookRow(
-        202,
-        "darken", m_effects.buildDim, m_buildDimSlider, m_buildDimLabel,
-        "grey", m_effects.buildDesaturate, m_buildDesaturateSlider, m_buildDesaturateLabel
-    );
+    CCLabelBMFont* colourHint = CCLabelBMFont::create("An empty bar starts in colour 2 (set with the 2 button on the bar page)", "chatFont.fnt");
+    colourHint->setScale(0.42f);
+    colourHint->setOpacity(150);
+    colourHint->setAnchorPoint({0.f, 0.5f});
+    colourHint->setPosition({38, 202});
+
+    m_mainLayer->addChild(colourHint);
 
     m_flashToggle = addToggle("Flash", 180, m_effects.flash);
     m_flashStartSlider = addSlider("starts at", 162, m_effects.flashStart, m_flashStartLabel);
@@ -227,8 +229,6 @@ void BarGlowLayer::updateLabels() {
     m_flashIntensityLabel->setString(percentText(m_effects.flashIntensity).c_str());
     m_flashPowerLabel->setString(fmt::format("{:.1f}", m_effects.flashPower).c_str());
     m_startPosOffsetLabel->setString(percentText(m_effects.startPosOffset).c_str());
-    m_buildDimLabel->setString(percentText(m_effects.buildDim).c_str());
-    m_buildDesaturateLabel->setString(percentText(m_effects.buildDesaturate).c_str());
     m_flashBrightenLabel->setString(fmt::format("+{}", percentText(m_effects.flashBrighten)).c_str());
     m_flashSaturateLabel->setString(fmt::format("+{}", percentText(m_effects.flashSaturate)).c_str());
 
@@ -274,8 +274,6 @@ void BarGlowLayer::onSlider(CCObject*) {
     m_effects.flashIntensity = std::clamp(m_flashIntensitySlider->getValue(), 0.f, 1.f);
     m_effects.flashPower = sliderToPower(m_flashPowerSlider->getValue());
     m_effects.startPosOffset = std::clamp(m_startPosOffsetSlider->getValue(), 0.f, 1.f);
-    m_effects.buildDim = std::clamp(m_buildDimSlider->getValue(), 0.f, 1.f);
-    m_effects.buildDesaturate = std::clamp(m_buildDesaturateSlider->getValue(), 0.f, 1.f);
     m_effects.flashBrighten = std::clamp(m_flashBrightenSlider->getValue(), 0.f, 1.f);
     m_effects.flashSaturate = std::clamp(m_flashSaturateSlider->getValue(), 0.f, 1.f);
 

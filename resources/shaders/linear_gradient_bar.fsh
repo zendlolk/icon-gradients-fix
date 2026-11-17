@@ -63,6 +63,9 @@ void main() {
     else
         color = texColor * gradientColor((v_texCoord - uvMin) / (uvMax - uvMin));
 
+    // Opacity always applies, so the bar's second colour can fade over it.
+    color.a *= u_tint == 1 ? 1.0 : v_fragmentColor.a;
+
     float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
 
     color.rgb = mix(vec3(luma), color.rgb, u_saturation) * u_brightness;

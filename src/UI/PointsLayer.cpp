@@ -143,12 +143,12 @@ void PointsLayer::setPage(EditorPage page) {
         unschedule(schedule_selector(PointsLayer::updateBarPreview));
 
         m_barPreviewTime = 0.f;
-        m_barFlashPhase = 0.f;
+        m_barFlashCycles = 0.f;
 
         if (page == EditorPage::Bar)
             schedule(schedule_selector(PointsLayer::updateBarPreview));
         else
-            setBarPreviewFill(1.f, 1.f);
+            setBarPreviewFill(1.f);
     }
 
     if (m_wave)
@@ -169,7 +169,7 @@ void PointsLayer::setBarPreview(bool enabled, float speed) {
 void PointsLayer::restartBarPreview(float from) {
     m_barPreviewFrom = std::clamp(from, 0.f, 0.99f);
     m_barPreviewTime = 0.f;
-    m_barFlashPhase = 0.f;
+    m_barFlashCycles = 0.f;
 }
 
 // The loop only plays when it is switched on and there is an effect to show,
@@ -208,13 +208,15 @@ bool PointsLayer::dragBarPreview(CCTouch* touch, bool begin) {
 }
 
 // Shows the preview bar filled to `progress` with its glow at `strength`.
-void PointsLayer::setBarPreviewFill(float progress, float strength, float brightness, float saturation) {
+void PointsLayer::setBarPreviewFill(float progress, float flashCycles, bool flashing, float mix) {
     if (!m_barFill) return;
 
     m_barFill->setTextureRect({ 0.f, 0.f, m_barFullSize.width * progress, m_barFullSize.height });
 
-    Utils::setBarGlowState(m_barGlow, progress, strength);
-    Utils::setBarFillLook(m_barFill, brightness, saturation);
+    Utils::updateBarEffects(
+        { m_barFill, m_barOverlay, m_barGlow, m_barOverlayGlow },
+        m_barEffects, progress, flashCycles, flashing, mix
+    );
 }
 
 // With glow effects on, the preview bar fills up on a loop so the build-up
@@ -224,10 +226,11 @@ void PointsLayer::updateBarPreview(float dt) {
 
     if (!isBarPreviewPlaying()) {
         m_barPreviewTime = 0.f;
-        m_barFlashPhase = 0.f;
+        m_barFlashCycles = 0.f;
         m_barDragging = false;
 
-        return setBarPreviewFill(1.f, 1.f);
+        // A full bar, in whichever colour is being edited.
+        return setBarPreviewFill(1.f, 0.f, false, m_barEditingSecondary ? 0.f : 1.f);
     }
 
     // Fills from the chosen starting point, pauses while full, then loops.
@@ -248,18 +251,11 @@ void PointsLayer::updateBarPreview(float dt) {
     float rate = Utils::getBarFlashRate(m_barEffects, progress, 0.f, false);
 
     if (rate > 0.f)
-        m_barFlashPhase = std::fmod(m_barFlashPhase + rate * dt, 1.f);
+        m_barFlashCycles += rate * dt;
     else
-        m_barFlashPhase = 0.f;
+        m_barFlashCycles = 0.f;
 
-    auto [brightness, saturation] = Utils::getBarLook(m_barEffects, progress, m_barFlashPhase, rate > 0.f);
-
-    setBarPreviewFill(
-        progress,
-        Utils::getBarGlowStrength(m_barEffects, progress, m_barFlashPhase, rate > 0.f),
-        brightness,
-        saturation
-    );
+    setBarPreviewFill(progress, m_barFlashCycles, rate > 0.f);
 }
 
 // The rect gradient points are positioned relative to.
@@ -557,15 +553,18 @@ void PointsLayer::updateGradient(GradientConfig config, ColorType colorType, boo
     if (m_page == EditorPage::Bar) {
         // The fill may be part way through its preview loop, so everything is
         // measured against the full bar rather than what is filled right now.
-        float scale = CCDirector::get()->getContentScaleFactor();
+        // Both of the bar's colours are shown, whichever is being edited.
+        BarSprites bar;
 
-        CCRect fullRect = CCRect(0.f, 0.f, m_barFullSize.width, m_barFullSize.height);
-        CCRect fullRectPixels = CCRect(0.f, 0.f, m_barFullSize.width * scale, m_barFullSize.height * scale);
+        Utils::setupBar(bar, m_barFill, CCRect(0.f, 0.f, m_barFullSize.width, m_barFullSize.height), false);
 
-        Utils::applyBarGradient(m_barFill, config, false, &fullRectPixels);
-
-        m_barGlow = Utils::updateBarGlow(m_barFill, fullRect, config, false, Utils::getGlow(GlowTarget::Bar, false));
+        m_barGlow = bar.glow;
+        m_barOverlay = bar.overlay;
+        m_barOverlayGlow = bar.overlayGlow;
         m_barEffects = Utils::getBarGlowEffects();
+        m_barEditingSecondary = colorType == ColorType::Secondary;
+
+        updateBarPreview(0.f);
 
         return;
     }

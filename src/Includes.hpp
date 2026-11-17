@@ -67,11 +67,6 @@ struct BarGlowEffects {
     bool buildExponential = false;
     float buildPower = 2.f; // only when exponential: higher = later and steeper
 
-    // How much darker and greyer the bar itself starts, reaching its own
-    // colours when full. 0 to 1.
-    float buildDim = 0.f;
-    float buildDesaturate = 0.f;
-
     // Glow pulses, faster the closer the bar is to full.
     bool flash = false;
     float flashStart = 0.8f; // progress (0 to 1) where it begins
@@ -89,6 +84,16 @@ struct BarGlowEffects {
     // level has to be played first.
     bool flashFromStartPos = false;
     float startPosOffset = 0.5f;
+};
+
+// The sprites that make up a progress bar with this mod's effects: its fill,
+// a copy of the fill in the bar's second colour that fades out as the bar
+// builds up, and a glow for each.
+struct BarSprites {
+    CCSprite* fill = nullptr;
+    CCSprite* overlay = nullptr;
+    CCSprite* glow = nullptr;
+    CCSprite* overlayGlow = nullptr;
 };
 
 struct SimplePoint {

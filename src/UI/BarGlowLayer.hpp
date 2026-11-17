@@ -35,15 +35,10 @@ private:
     CCLabelBMFont* m_flashPowerLabel = nullptr;
     CCLabelBMFont* m_startPosOffsetLabel = nullptr;
 
-    // How much the bar itself darkens and greys during build-up, and
-    // brightens and saturates while flashing.
-    Slider* m_buildDimSlider = nullptr;
-    Slider* m_buildDesaturateSlider = nullptr;
+    // How much the bar and its glow brighten and saturate while flashing.
     Slider* m_flashBrightenSlider = nullptr;
     Slider* m_flashSaturateSlider = nullptr;
 
-    CCLabelBMFont* m_buildDimLabel = nullptr;
-    CCLabelBMFont* m_buildDesaturateLabel = nullptr;
     CCLabelBMFont* m_flashBrightenLabel = nullptr;
     CCLabelBMFont* m_flashSaturateLabel = nullptr;
 

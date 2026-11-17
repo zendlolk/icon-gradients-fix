@@ -32,6 +32,9 @@ uniform vec2 u_radius;
 uniform float u_gain;
 // Scales the whole glow, for glows that change while playing.
 uniform float u_strength;
+// Multiples of the glow's colour, so it can follow what its sprite does.
+uniform float u_brightness;
+uniform float u_saturation;
 // How much light the glow adds on top of the sprite itself.
 uniform float u_inner;
 
@@ -116,5 +119,10 @@ void main() {
 
     // Premultiplied: around the sprite this blends over the background, on
     // top of the sprite it only adds light.
-    gl_FragColor = vec4(gradientColor(uv).rgb * (outer + inner), outer * 0.85) * v_fragmentColor.a;
+    vec3 color = gradientColor(uv).rgb;
+    float luma = dot(color, vec3(0.299, 0.587, 0.114));
+
+    color = mix(vec3(luma), color, u_saturation) * u_brightness;
+
+    gl_FragColor = vec4(color * (outer + inner), outer * 0.85) * v_fragmentColor.a;
 }

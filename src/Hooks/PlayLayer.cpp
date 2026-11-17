@@ -11,7 +11,7 @@ void ProPlayLayer::resetLevel() {
     auto f = m_fields.self();
 
     f->m_runStart = -1.f;
-    f->m_flashPhase = 0.f;
+    f->m_flashCycles = 0.f;
 }
 
 void ProPlayLayer::updateBarGradient(float dt) {
@@ -19,7 +19,7 @@ void ProPlayLayer::updateBarGradient(float dt) {
 
     if (!m_progressFill || m_progressWidth <= 0.f || m_progressHeight <= 0.f) return;
 
-    // The glow has to follow the bar as it fills.
+    // The glow and the effects follow the bar as it fills.
     if (f->m_barGradientApplied) {
         if (!f->m_barGlow && !f->m_barEffects.buildUp && !f->m_barEffects.flash) return;
 
@@ -30,54 +30,38 @@ void ProPlayLayer::updateBarGradient(float dt) {
 
         float rate = Utils::getBarFlashRate(f->m_barEffects, progress, f->m_runStart, m_isTestMode);
 
-        // Adding up the phase, rather than working it out from the time,
+        // Adding up the flashes, rather than working them out from the time,
         // keeps the flashing smooth while its pace changes.
         if (rate > 0.f)
-            f->m_flashPhase = std::fmod(f->m_flashPhase + rate * dt, 1.f);
+            f->m_flashCycles += rate * dt;
         else
-            f->m_flashPhase = 0.f;
+            f->m_flashCycles = 0.f;
 
-        Utils::setBarGlowState(
-            f->m_barGlow,
-            progress,
-            Utils::getBarGlowStrength(f->m_barEffects, progress, f->m_flashPhase, rate > 0.f)
+        Utils::updateBarEffects(
+            { m_progressFill, f->m_barOverlay, f->m_barGlow, f->m_barOverlayGlow },
+            f->m_barEffects, progress, f->m_flashCycles, rate > 0.f
         );
-
-        auto [brightness, saturation] = Utils::getBarLook(f->m_barEffects, progress, f->m_flashPhase, rate > 0.f);
-
-        Utils::setBarFillLook(m_progressFill, brightness, saturation);
 
         return;
     }
 
     f->m_barGradientApplied = true;
 
-    // The fill grows by widening its texture rect, so span the gradient over
-    // the rect of the full bar instead of whatever is currently filled.
-    float scale = CCDirector::get()->getContentScaleFactor();
+    // The fill grows by widening its texture rect, so the gradient spans the
+    // rect of the full bar instead of whatever is currently filled.
     CCPoint origin = m_progressFill->getTextureRect().origin;
 
-    CCRect fullRect = CCRect(
-        origin.x * scale,
-        origin.y * scale,
-        m_progressWidth * scale,
-        m_progressHeight * scale
-    );
+    BarSprites bar;
 
-    Utils::applyBarGradient(m_progressFill, Utils::getSavedBarConfig(), true, &fullRect);
+    Utils::setupBar(bar, m_progressFill, CCRect(origin.x, origin.y, m_progressWidth, m_progressHeight), true);
 
+    f->m_barGlow = bar.glow;
+    f->m_barOverlay = bar.overlay;
+    f->m_barOverlayGlow = bar.overlayGlow;
     f->m_barEffects = Utils::getBarGlowEffects();
 
-    f->m_barGlow = Utils::updateBarGlow(
-        m_progressFill,
-        CCRect(origin.x, origin.y, m_progressWidth, m_progressHeight),
-        Utils::getSavedBarConfig(),
-        true,
-        Utils::getGlow(GlowTarget::Bar, false)
-    );
-
     // Until the next frame works out the real values.
-    Utils::setBarGlowState(f->m_barGlow, 0.f, f->m_barEffects.buildUp ? 0.f : 1.f);
+    Utils::updateBarEffects(bar, f->m_barEffects, 0.f, 0.f, false);
 }
 
 void ProPlayLayer::postUpdate(float dt) {

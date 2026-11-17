@@ -26,6 +26,8 @@ public:
     static GradientConfig getDefaultBarConfig();
     static GradientConfig getSavedBarConfig();
     static void saveBarConfig(GradientConfig);
+    static GradientConfig getSavedBarConfig2();
+    static void saveBarConfig2(GradientConfig);
 
     static std::string getWaveID(bool);
     static GradientConfig getDefaultWaveConfig(bool);
@@ -39,14 +41,17 @@ public:
     static GlowSettings getWaveGlow(bool);
 
     static CCSprite* updateSpriteGlow(CCSprite*, GradientConfig, IconType, int, bool, bool, int, const GlowSettings&);
-    static CCSprite* updateBarGlow(CCSprite*, const CCRect&, GradientConfig, bool, const GlowSettings&);
-    static void setBarGlowState(CCSprite*, float, float);
+    static CCSprite* updateBarGlow(CCSprite*, const CCRect&, GradientConfig, bool, const GlowSettings&, int = 801);
+    static void setBarGlowState(CCSprite*, float, float, float = 1.f, float = 1.f);
+    static void setupBar(BarSprites&, CCSprite*, const CCRect&, bool);
+    static void updateBarEffects(const BarSprites&, const BarGlowEffects&, float, float, bool, float = -1.f);
+    static float getBarBuild(const BarGlowEffects&, float);
 
     static BarGlowEffects getBarGlowEffects();
     static void saveBarGlowEffects(const BarGlowEffects&);
     static float getBarFlashRate(const BarGlowEffects&, float, float, bool);
     static float getBarGlowStrength(const BarGlowEffects&, float, float, bool);
-    static std::pair<float, float> getBarLook(const BarGlowEffects&, float, float, bool);
+    static std::pair<float, float> getBarLook(const BarGlowEffects&, float, bool);
     static void setBarFillLook(CCSprite*, float, float);
     static float getWaveGlowReach(const GlowSettings&);
     static std::vector<WaveNode> computeWaveProfile(const GradientConfig&, const GlowSettings&);
@@ -67,7 +72,7 @@ public:
     static void applyGradient(SimplePlayer*, Gradient, bool, bool, int);
     static void applyGradient(SimplePlayer*, GradientConfig, ColorType, bool, bool, int);
     static void applyGradient(CCSprite*, GradientConfig, IconType, ColorType, int, bool, bool, bool, int, bool = false, const CCRect* = nullptr, bool = false, bool = false, bool = false);
-    static void applyBarGradient(CCSprite*, GradientConfig, bool, const CCRect* = nullptr);
+    static void applyBarGradient(CCSprite*, GradientConfig, bool, const CCRect* = nullptr, int = 800);
     
     static CCGLProgram* createShader(const std::string&, bool, bool, bool, bool = false, bool = false);
     

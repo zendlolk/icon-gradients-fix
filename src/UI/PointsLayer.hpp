@@ -17,6 +17,11 @@ private:
     CCNode* m_bar = nullptr;
     CCSprite* m_barFill = nullptr;
     CCSprite* m_barGlow = nullptr;
+    CCSprite* m_barOverlay = nullptr;
+    CCSprite* m_barOverlayGlow = nullptr;
+
+    // Shows the bar's second colour while it is being edited.
+    bool m_barEditingSecondary = false;
 
     CCSize m_barFullSize = { 0.f, 0.f };
 
@@ -28,7 +33,7 @@ private:
 
     bool m_barPreviewEnabled = true;
     bool m_barDragging = false;
-    float m_barFlashPhase = 0.f;
+    float m_barFlashCycles = 0.f;
 
     CCNode* m_wave = nullptr;
     CCDrawNode* m_waveDraw = nullptr;
@@ -68,7 +73,7 @@ private:
     void createWave();
 
     void updateBarPreview(float);
-    void setBarPreviewFill(float, float, float = 1.f, float = 1.f);
+    void setBarPreviewFill(float, float = 0.f, bool = false, float = -1.f);
 
     bool isBarPreviewPlaying();
     bool dragBarPreview(CCTouch*, bool);
