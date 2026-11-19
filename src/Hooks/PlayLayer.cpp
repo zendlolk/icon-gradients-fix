@@ -26,8 +26,29 @@ void ProPlayLayer::destroyPlayer(PlayerObject* player, GameObject* object) {
 
     bool plays = effects.deathFlashOnly ? f->m_lastFlashing : f->m_lastProgress >= effects.deathFrom;
 
-    if (plays)
-        f->m_deathTime = 0.f;
+    if (!plays) return;
+
+    f->m_deathTime = 0.f;
+
+    // Cracking and shattering break up the whole bar, frame and all.
+    if (effects.deathStyle == 1 || effects.deathStyle == 2) {
+        clearBarPieces();
+
+        f->m_barPieces = Utils::shatterBar(m_progressBar, effects.deathStyle);
+    }
+}
+
+// Puts the bar back together for a new attempt.
+void ProPlayLayer::clearBarPieces() {
+    auto f = m_fields.self();
+
+    if (!f->m_barPieces) return;
+
+    f->m_barPieces->removeFromParentAndCleanup(true);
+    f->m_barPieces = nullptr;
+
+    if (m_progressBar)
+        m_progressBar->setVisible(true);
 }
 
 void ProPlayLayer::resetLevel() {
@@ -40,6 +61,8 @@ void ProPlayLayer::resetLevel() {
     f->m_flashCycles = 0.f;
     f->m_completeTime = -1.f;
     f->m_deathTime = -1.f;
+
+    clearBarPieces();
 }
 
 void ProPlayLayer::updateBarGradient(float dt) {

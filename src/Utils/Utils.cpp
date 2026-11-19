@@ -1595,25 +1595,6 @@ void Utils::setBarGlowState(CCSprite* glow, float fill, float strength, float br
     glUniform1i(glGetUniformLocation(id, "u_glowStyle"), style);
 }
 
-// The death animation on one of the bar's layers.
-void Utils::setBarDeath(CCSprite* layer, int style, float amount, float fill) {
-    if (!layer || !layer->isVisible()) return;
-
-    CCGLProgram* program = layer->getShaderProgram();
-
-    if (!program) return;
-
-    GLuint id = program->getProgram();
-    GLint location = glGetUniformLocation(id, "u_deathStyle");
-
-    if (location < 0) return;
-
-    program->use();
-
-    glUniform1i(location, style);
-    glUniform1f(glGetUniformLocation(id, "u_death"), amount);
-    glUniform1f(glGetUniformLocation(id, "u_deathPoint"), fill);
-}
 
 // Sets up a progress bar's fill with both of its colours and their glows.
 // `fullRect` is the texture rect of the completely filled bar, in points.
@@ -1719,24 +1700,19 @@ void Utils::updateBarEffects(const BarSprites& bar, const BarGlowEffects& effect
         }
     }
 
-    // Death: the bar greys out, or cracks or shatters, and its glow fades.
-    float death = state.deathTime >= 0.f && effects.deathStyle > 0
+    // Death: the bar greys out and its glow dims. Cracking and shattering
+    // replace the whole bar with pieces instead, see shatterBar.
+    float death = state.deathTime >= 0.f && effects.deathStyle == 3
         ? std::clamp(state.deathTime / 0.7f, 0.f, 1.f)
         : 0.f;
 
     if (death > 0.f) {
         death = 1.f - (1.f - death) * (1.f - death);
 
-        if (effects.deathStyle == 3) {
-            brightness *= 1.f - 0.55f * death;
-            saturation *= 1.f - death;
-            strength *= 1.f - 0.5f * death;
-        } else
-            strength *= 1.f - death;
+        brightness *= 1.f - 0.55f * death;
+        saturation *= 1.f - death;
+        strength *= 1.f - 0.5f * death;
     }
-
-    // Grey is done with brightness and saturation, the others in the shader.
-    int deathShape = death > 0.f && effects.deathStyle < 3 ? effects.deathStyle : 0;
 
     setBarFillLook(bar.fill, brightness, saturation);
 
@@ -1760,9 +1736,6 @@ void Utils::updateBarEffects(const BarSprites& bar, const BarGlowEffects& effect
     showLayer(bar.complete, complete);
 
     setBarAnim(bar.complete, anim, animPhase, animSize, white);
-
-    for (CCSprite* layer : { bar.fill, bar.overlay, bar.complete })
-        setBarDeath(layer, deathShape, death, state.progress);
 
     // Each glow in its own colour, together as strong as one.
     float rest = 1.f - complete;
@@ -1941,6 +1914,248 @@ float Utils::getBarGlowStrength(const BarGlowEffects& effects, float progress, f
     }
 
     return strength;
+}
+
+// Draws only the part of a sprite between two slanted cuts. The cuts come in
+// through the sprite's colour, so every piece can share one program: red is
+// the left cut and green the right, across the texture (0 and 1 mean none).
+static CCGLProgram* getPieceShader() {
+    CCGLProgram* program = CCShaderCache::sharedShaderCache()->programForKey("bar-piece"_spr);
+
+    if (program) return program;
+
+    program = new CCGLProgram();
+    program->initWithVertexShaderByteArray(
+        R"(
+            attribute vec4 a_position;
+            attribute vec2 a_texCoord;
+            attribute vec4 a_color;
+
+            #ifdef GL_ES
+            varying lowp vec4 v_fragmentColor;
+            varying mediump vec2 v_texCoord;
+            #else
+            varying vec4 v_fragmentColor;
+            varying vec2 v_texCoord;
+            #endif
+
+            void main() {
+                gl_Position = CC_MVPMatrix * a_position;
+                v_fragmentColor = a_color;
+                v_texCoord = a_texCoord;
+            }
+        )",
+        R"(
+            #ifdef GL_ES
+            precision mediump float;
+            #endif
+
+            varying vec4 v_fragmentColor;
+            varying vec2 v_texCoord;
+
+            uniform sampler2D u_texture;
+            uniform vec2 u_texMax;
+            uniform float u_slope;
+            uniform float u_edge;
+
+            void main() {
+                vec2 p = v_texCoord / u_texMax;
+                float shift = u_slope * (p.y - 0.5);
+
+                float left = v_fragmentColor.r < 0.002 ? -1.0 : v_fragmentColor.r + shift;
+                float right = v_fragmentColor.g > 0.998 ? 2.0 : v_fragmentColor.g + shift;
+
+                float keep = smoothstep(left - u_edge, left + u_edge, p.x)
+                    * (1.0 - smoothstep(right - u_edge, right + u_edge, p.x));
+
+                gl_FragColor = texture2D(u_texture, v_texCoord) * (v_fragmentColor.a * keep);
+            }
+        )"
+    );
+    program->addAttribute(kCCAttributeNamePosition, kCCVertexAttrib_Position);
+    program->addAttribute(kCCAttributeNameColor, kCCVertexAttrib_Color);
+    program->addAttribute(kCCAttributeNameTexCoord, kCCVertexAttrib_TexCoords);
+    program->link();
+    program->updateUniforms();
+
+    CCShaderCache::sharedShaderCache()->addProgram(program, "bar-piece"_spr);
+    program->release();
+
+    return program;
+}
+
+static float randomBetween(float min, float max) {
+    return min + (max - min) * (static_cast<float>(std::rand()) / RAND_MAX);
+}
+
+// Breaks a whole progress bar, frame and all, into pieces that fall apart:
+// 1 cracks it into three, 2 shatters it into many. The bar is drawn once
+// into a texture, and each piece is a sprite of it cut to shape by a shader,
+// moved by actions. Returns the node holding the pieces, which takes the
+// bar's place; the bar itself is hidden. Nothing is done per frame here.
+CCNode* Utils::shatterBar(CCSprite* bar, int style) {
+    if (!bar || !bar->getParent() || style < 1 || style > 2) return nullptr;
+
+    CCSize size = bar->getContentSize();
+
+    if (size.width < 1.f || size.height < 1.f) return nullptr;
+
+    // Room for the glow around the bar.
+    const float pad = 24.f;
+
+    CCSize canvas = { size.width + pad * 2.f, size.height + pad * 2.f };
+
+    // Cuts across the bar, slanted, as fractions of the canvas width.
+    int pieces = style == 1 ? 3 : 7;
+    float slope = 0.7f * canvas.height / canvas.width;
+
+    std::vector<float> cuts;
+
+    for (int i = 1; i < pieces; i++) {
+        float spot = static_cast<float>(i) / pieces + randomBetween(-0.3f, 0.3f) / pieces;
+
+        cuts.push_back((pad + spot * size.width) / canvas.width);
+    }
+
+    CCRenderTexture* texture = CCRenderTexture::create(
+        static_cast<int>(canvas.width), static_cast<int>(canvas.height), kCCTexture2DPixelFormat_RGBA8888
+    );
+
+    if (!texture) return nullptr;
+
+    // Hairline cracks, drawn into the texture so they move with the pieces.
+    CCDrawNode* cracks = CCDrawNode::create();
+    ccColor4F crackColour = ccc4f(0.f, 0.f, 0.f, 0.7f);
+
+    for (int piece = 0; piece < pieces; piece++) {
+        float left = piece == 0 ? pad : cuts[piece - 1] * canvas.width;
+        float right = piece == pieces - 1 ? pad + size.width : cuts[piece] * canvas.width;
+
+        for (int i = 0; i < (style == 1 ? 2 : 1); i++) {
+            bool fromBottom = std::rand() % 2 == 0;
+
+            CCPoint point = ccp(randomBetween(left + 3.f, std::max(left + 3.f, right - 3.f)), fromBottom ? pad : pad + size.height);
+
+            for (int step = 0; step < 3; step++) {
+                CCPoint next = point + ccp(randomBetween(-2.f, 2.f), (fromBottom ? 1.f : -1.f) * randomBetween(1.5f, size.height * 0.25f));
+
+                cracks->drawSegment(point, next, 0.45f, crackColour);
+
+                point = next;
+            }
+        }
+    }
+
+    // Draw the bar into the texture where it would be on the canvas.
+    CCPoint position = bar->getPosition();
+    float scaleX = bar->getScaleX();
+    float scaleY = bar->getScaleY();
+    float rotation = bar->getRotation();
+    bool visible = bar->isVisible();
+
+    bar->setPosition(ccp(pad + bar->getAnchorPoint().x * size.width, pad + bar->getAnchorPoint().y * size.height));
+    bar->setScale(1.f);
+    bar->setRotation(0.f);
+    bar->setVisible(true);
+
+    texture->beginWithClear(0.f, 0.f, 0.f, 0.f);
+    bar->visit();
+    cracks->visit();
+    texture->end();
+
+    bar->setPosition(position);
+    bar->setScaleX(scaleX);
+    bar->setScaleY(scaleY);
+    bar->setRotation(rotation);
+    bar->setVisible(visible);
+
+    CCTexture2D* image = texture->getSprite()->getTexture();
+    CCGLProgram* program = getPieceShader();
+
+    if (!image || !program) return nullptr;
+
+    program->use();
+
+    GLuint programID = program->getProgram();
+    CCSize imageSize = image->getContentSizeInPixels();
+
+    glUniform2f(
+        glGetUniformLocation(programID, "u_texMax"),
+        imageSize.width / std::max(1u, image->getPixelsWide()),
+        imageSize.height / std::max(1u, image->getPixelsHigh())
+    );
+    glUniform1f(glGetUniformLocation(programID, "u_slope"), slope);
+    glUniform1f(glGetUniformLocation(programID, "u_edge"), 0.6f / canvas.width);
+
+    // Stands where the bar is, so the pieces are laid out in its own space.
+    CCNode* holder = CCNode::create();
+    holder->setID("bar-pieces"_spr);
+    holder->setContentSize(size);
+    holder->setAnchorPoint(bar->getAnchorPoint());
+    holder->setPosition(position);
+    holder->setScaleX(scaleX);
+    holder->setScaleY(scaleY);
+    holder->setRotation(rotation);
+
+    bar->getParent()->addChild(holder, bar->getZOrder());
+
+    float lifetime = style == 1 ? 1.f : 0.85f;
+
+    for (int piece = 0; piece < pieces; piece++) {
+        float left = piece == 0 ? 0.f : cuts[piece - 1];
+        float right = piece == pieces - 1 ? 1.f : cuts[piece];
+
+        float barLeft = piece == 0 ? pad / canvas.width : left;
+        float barRight = piece == pieces - 1 ? (pad + size.width) / canvas.width : right;
+        float centre = (barLeft + barRight) / 2.f;
+
+        CCSprite* sprite = CCSprite::createWithTexture(image);
+        sprite->setFlipY(true);
+        sprite->setOpacityModifyRGB(false);
+        sprite->setShaderProgram(program);
+        sprite->setBlendFunc({ GL_ONE, GL_ONE_MINUS_SRC_ALPHA });
+        sprite->setColor(ccc3(
+            static_cast<GLubyte>(std::round(left * 255.f)),
+            static_cast<GLubyte>(std::round(right * 255.f)),
+            255
+        ));
+
+        // Turns about the middle of its own piece.
+        sprite->setAnchorPoint({centre, 0.5f});
+        sprite->setPosition(ccp(-pad + centre * canvas.width, size.height / 2.f));
+
+        holder->addChild(sprite);
+
+        // Away from the middle of the bar, more so the further out.
+        float side = (centre - 0.5f) * 2.f;
+        float spin = (side >= 0.f ? 1.f : -1.f) * (style == 1 ? randomBetween(3.f, 9.f) : randomBetween(14.f, 40.f));
+
+        CCFiniteTimeAction* move = style == 1
+            ? static_cast<CCFiniteTimeAction*>(CCEaseIn::create(
+                CCMoveBy::create(lifetime, ccp(side * randomBetween(5.f, 9.f), -randomBetween(14.f, 22.f))), 2.f
+            ))
+            : static_cast<CCFiniteTimeAction*>(CCJumpBy::create(
+                lifetime, ccp(side * randomBetween(8.f, 24.f) + randomBetween(-4.f, 4.f), -randomBetween(18.f, 30.f)), randomBetween(6.f, 14.f), 1
+            ));
+
+        // A crack holds together for a moment before it gives.
+        float hold = style == 1 ? 0.12f : 0.03f;
+
+        sprite->runAction(CCSequence::create(
+            CCDelayTime::create(hold),
+            CCSpawn::create(
+                move,
+                CCEaseIn::create(CCRotateBy::create(lifetime, spin), 1.6f),
+                CCSequence::create(CCDelayTime::create(lifetime * 0.45f), CCFadeOut::create(lifetime * 0.55f), nullptr),
+                nullptr
+            ),
+            nullptr
+        ));
+    }
+
+    bar->setVisible(false);
+
+    return holder;
 }
 
 void Utils::patchBatchNode(CCSpriteBatchNode* node) {

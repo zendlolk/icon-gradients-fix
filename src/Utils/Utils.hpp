@@ -41,7 +41,6 @@ public:
     static CCSprite* updateSpriteGlow(CCSprite*, GradientConfig, IconType, int, bool, bool, int, const GlowSettings&);
     static CCSprite* updateBarGlow(CCSprite*, const CCRect&, GradientConfig, bool, const GlowSettings&, int = 801);
     static void setBarGlowState(CCSprite*, float, float, float = 1.f, float = 1.f, int = 0);
-    static void setBarDeath(CCSprite*, int, float, float);
     static void setupBar(BarSprites&, CCSprite*, const CCRect&, bool);
     static void updateBarEffects(const BarSprites&, const BarGlowEffects&, const BarState&);
     static void setBarAnim(CCSprite*, int, float, float, float);
@@ -77,6 +76,8 @@ public:
     
     static CCGLProgram* createShader(const std::string&, bool, bool, bool, bool = false, bool = false);
     
+    static CCNode* shatterBar(CCSprite*, int);
+
     static void patchBatchNode(CCSpriteBatchNode*);
     static void hideSprite(CCSprite*);
 

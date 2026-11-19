@@ -23,6 +23,9 @@ class $modify(ProPlayLayer, PlayLayer) {
 
         bool m_barTicking = false;
 
+        // The pieces of a cracked or shattered bar, while they fall.
+        Ref<CCNode> m_barPieces = nullptr;
+
         BarGlowEffects m_barEffects;
 
         // Where this attempt started (0 to 1), or below 0 until known.
@@ -35,6 +38,7 @@ class $modify(ProPlayLayer, PlayLayer) {
     void barTick(float);
 
     void destroyPlayer(PlayerObject*, GameObject*);
+    void clearBarPieces();
 
     void resetLevel();
 
