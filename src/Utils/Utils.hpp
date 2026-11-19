@@ -24,10 +24,8 @@ public:
     static GradientConfig getSavedConfig(IconType, ColorType, bool = false);
     static GradientConfig getDefaultConfig(ColorType, bool);
     static GradientConfig getDefaultBarConfig();
-    static GradientConfig getSavedBarConfig();
-    static void saveBarConfig(GradientConfig);
-    static GradientConfig getSavedBarConfig2();
-    static void saveBarConfig2(GradientConfig);
+    static GradientConfig getSavedBarConfig(int = 0);
+    static void saveBarConfig(GradientConfig, int = 0);
 
     static std::string getWaveID(bool);
     static GradientConfig getDefaultWaveConfig(bool);
@@ -44,7 +42,9 @@ public:
     static CCSprite* updateBarGlow(CCSprite*, const CCRect&, GradientConfig, bool, const GlowSettings&, int = 801);
     static void setBarGlowState(CCSprite*, float, float, float = 1.f, float = 1.f);
     static void setupBar(BarSprites&, CCSprite*, const CCRect&, bool);
-    static void updateBarEffects(const BarSprites&, const BarGlowEffects&, float, float, bool, float = -1.f);
+    static void updateBarEffects(const BarSprites&, const BarGlowEffects&, const BarState&);
+    static void setBarAnim(CCSprite*, int, float, float, float);
+    static float getBarCompleteFade(const BarGlowEffects&);
     static float getBarBuild(const BarGlowEffects&, float);
 
     static BarGlowEffects getBarGlowEffects();

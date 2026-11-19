@@ -9,6 +9,11 @@ class $modify(ProPlayLayer, PlayLayer) {
         Ref<CCSprite> m_barGlow = nullptr;
         Ref<CCSprite> m_barOverlay = nullptr;
         Ref<CCSprite> m_barOverlayGlow = nullptr;
+        Ref<CCSprite> m_barComplete = nullptr;
+        Ref<CCSprite> m_barCompleteGlow = nullptr;
+
+        // Seconds since the bar reached the end, or below 0.
+        float m_completeTime = -1.f;
 
         BarGlowEffects m_barEffects;
 

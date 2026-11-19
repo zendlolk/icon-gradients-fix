@@ -43,6 +43,10 @@ private:
     CCMenuItemToggler* m_glowLinkToggle = nullptr;
     CCMenuItemSpriteExtra* m_barGlowButton = nullptr;
 
+    // The progress bar's three colours: main, start, and level complete.
+    ColorToggle* m_barColorToggles[3] = { nullptr, nullptr, nullptr };
+    int m_barColor = 0;
+
     CCMenuItemToggler* m_barPreviewToggle = nullptr;
     Slider* m_barPreviewSlider = nullptr;
     TextInput* m_barPreviewInput = nullptr;
@@ -122,6 +126,7 @@ private:
 
     void onGlowLink(CCObject*);
     void onBarGlowOptions(CCObject*);
+    void onBarColorToggle(CCObject*);
     void onBarPreviewToggle(CCObject*);
     void onBarPreviewSlider(CCObject*);
     void onBarPreviewStart(CCObject*);

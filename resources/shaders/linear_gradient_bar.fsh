@@ -29,6 +29,16 @@ uniform int u_tint;
 uniform float u_brightness;
 uniform float u_saturation;
 
+// Level-complete animations. 0: none. 1: the gradient repeats along the bar
+// and scrolls right, each copy mirrored so it runs into the next without a
+// seam. 2: a band of light sweeps across.
+uniform int u_anim;
+uniform float u_animPhase;
+// Copies across the bar for 1, width of the light for 2.
+uniform float u_animSize;
+// Fades everything to white, for the flash on completion.
+uniform float u_white;
+
 vec4 gradientColor(vec2 uv) {
     if (stopAt <= 1) return colors[0];
 
@@ -54,6 +64,27 @@ vec4 gradientColor(vec2 uv) {
 }
 
 
+vec4 animatedColor(vec2 uv) {
+    if (u_anim == 1) {
+        float t = uv.x * u_animSize - u_animPhase;
+        float f = fract(t * 0.5) * 2.0;
+        float p = f < 1.0 ? f : 2.0 - f;
+
+        return gradientColor(startPoint + (endPoint - startPoint) * p);
+    }
+
+    vec4 color = gradientColor(uv);
+
+    if (u_anim == 2) {
+        float centre = fract(u_animPhase) * 1.6 - 0.3;
+        float d = (uv.x - centre) / max(u_animSize, 0.001);
+
+        color.rgb = mix(color.rgb, vec3(1.0), exp(-d * d) * 0.65);
+    }
+
+    return color;
+}
+
 void main() {
     vec4 texColor = texture2D(u_texture, v_texCoord);
     vec4 color;
@@ -61,7 +92,7 @@ void main() {
     if (u_tint == 1)
         color = texColor * v_fragmentColor;
     else
-        color = texColor * gradientColor((v_texCoord - uvMin) / (uvMax - uvMin));
+        color = texColor * animatedColor((v_texCoord - uvMin) / (uvMax - uvMin));
 
     // Opacity always applies, so the bar's second colour can fade over it.
     // Sprites are drawn premultiplied, so the colour fades with it; the
@@ -72,6 +103,9 @@ void main() {
     float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
 
     color.rgb = mix(vec3(luma), color.rgb, u_saturation) * u_brightness;
+
+    // Premultiplied, so white is as bright as the sprite is opaque.
+    color.rgb = mix(color.rgb, vec3(color.a), u_white);
 
     gl_FragColor = color;
 }

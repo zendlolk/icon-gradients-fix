@@ -199,6 +199,22 @@ void GradientLayer::onBarPreviewStart(CCObject*) {
     m_pointsLayer->restartBarPreview(percent / 100.f);
 }
 
+void GradientLayer::onBarColorToggle(CCObject* sender) {
+    if (m_page != EditorPage::Bar) return;
+
+    for (int i = 0; i < 3; i++) {
+        if (m_barColorToggles[i] != sender) continue;
+        if (i == m_barColor) return;
+
+        m_barColor = i;
+    }
+
+    for (int i = 0; i < 3; i++)
+        m_barColorToggles[i]->setSelected(i == m_barColor);
+
+    load(m_selectedButton->getType(), m_currentColor, true, true, true);
+}
+
 void GradientLayer::onBarGlowOptions(CCObject*) {
     BarGlowLayer::create(this)->show();
 }
@@ -333,7 +349,7 @@ GradientLayer* GradientLayer::create() {
 // progress bar, or the wave trail.
 GradientConfig GradientLayer::getEditedConfig() {
     if (m_page == EditorPage::Bar)
-        return m_currentColor == ColorType::Secondary ? Utils::getSavedBarConfig2() : Utils::getSavedBarConfig();
+        return Utils::getSavedBarConfig(m_barColor);
 
     if (m_page == EditorPage::Wave)
         return Utils::getSavedWaveConfig(m_isSecondPlayer);
@@ -380,27 +396,21 @@ void GradientLayer::onPageToggle(CCObject* sender) {
     // Everything that only makes sense for icons.
     m_sidebarBg->setVisible(!m_extraPage);
     m_dotToggle->setVisible(!m_extraPage);
-    // The progress bar has two colours of its own, chosen with the same 1
-    // and 2 buttons as an icon's.
-    m_mainColorToggle->setVisible(!m_extraPage || m_page == EditorPage::Bar);
-    m_secondaryColorToggle->setVisible(!m_extraPage || m_page == EditorPage::Bar);
-
-    if (
-        m_page == EditorPage::Bar
-        && m_currentColor != ColorType::Main
-        && m_currentColor != ColorType::Secondary
-    ) {
-        m_glowColorToggle->setSelected(false);
-        m_whiteColorToggle->setSelected(false);
-        m_lineColorToggle->setSelected(false);
-        m_secondaryColorToggle->setSelected(false);
-        m_mainColorToggle->setSelected(true);
-
-        m_currentColor = ColorType::Main;
-    }
+    m_mainColorToggle->setVisible(!m_extraPage);
+    m_secondaryColorToggle->setVisible(!m_extraPage);
     m_glowColorToggle->setVisible(!m_extraPage);
     m_whiteColorToggle->setVisible(!m_extraPage);
     m_lineColorToggle->setVisible(!m_extraPage);
+    // The progress bar has three colours of its own, and its gradients always
+    // run along it.
+    for (ColorToggle* toggle : m_barColorToggles)
+        toggle->setVisible(m_page == EditorPage::Bar);
+
+    m_linearToggle->setVisible(m_page != EditorPage::Bar);
+    m_radialToggle->setVisible(m_page != EditorPage::Bar);
+    m_linearLabel->setVisible(m_page != EditorPage::Bar);
+    m_radialLabel->setVisible(m_page != EditorPage::Bar);
+
     // The progress bar is shared, but each player has their own wave trail.
     m_playerToggle->setVisible(m_page != EditorPage::Bar && Utils::isSettingEnabled(P2_SEPARATE));
 
@@ -428,8 +438,11 @@ void GradientLayer::updateGradient(bool force, bool all, bool transition) {
 
     if (m_extraPage) {
         if (m_page == EditorPage::Bar) {
-            m_mainColorToggle->applyGradient(Utils::getSavedBarConfig(), force, transition);
-            m_secondaryColorToggle->applyGradient(Utils::getSavedBarConfig2(), force, transition);
+            for (int i = 0; i < 3; i++)
+                m_barColorToggles[i]->applyGradient(Utils::getSavedBarConfig(i), force, transition);
+
+            // Tells the preview which of the bar's colours to show.
+            return m_pointsLayer->updateGradient(m_currentConfig, static_cast<ColorType>(m_barColor + 1), force);
         }
 
         return m_pointsLayer->updateGradient(m_currentConfig, m_currentColor, force);
@@ -624,7 +637,7 @@ void GradientLayer::save() {
 
 void GradientLayer::save(GradientConfig config, ColorType colorType) {
     if (m_page == EditorPage::Bar)
-        return m_currentColor == ColorType::Secondary ? Utils::saveBarConfig2(config) : Utils::saveBarConfig(config);
+        return Utils::saveBarConfig(config, m_barColor);
 
     if (m_page == EditorPage::Wave)
         return Utils::saveWaveConfig(config, m_isSecondPlayer);
@@ -720,9 +733,7 @@ void GradientLayer::onLockToggle(CCObject* sender) {
 void GradientLayer::onColorToggle(CCObject* sender) {
     ColorToggle* toggle = static_cast<ColorToggle*>(sender);
     
-    bool barColor = m_page == EditorPage::Bar && (toggle == m_mainColorToggle || toggle == m_secondaryColorToggle);
-
-    if ((m_extraPage && !barColor) || !toggle->isEnabled()) return;
+    if (m_extraPage || !toggle->isEnabled()) return;
     
     if (toggle == m_mainColorToggle && m_mainColorToggle->isSelected()) return;
     if (toggle == m_secondaryColorToggle && m_secondaryColorToggle->isSelected()) return;
@@ -802,6 +813,12 @@ void GradientLayer::keyDown(enumKeyCodes key, double timestamp) {
 
     if (key == enumKeyCodes::KEY_Enter)
         return onAddPoint(nullptr);
+
+    if (m_page == EditorPage::Bar) {
+        if (key == enumKeyCodes::KEY_One) return onBarColorToggle(m_barColorToggles[0]);
+        if (key == enumKeyCodes::KEY_Two) return onBarColorToggle(m_barColorToggles[1]);
+        if (key == enumKeyCodes::KEY_Three) return onBarColorToggle(m_barColorToggles[2]);
+    }
 
     if (key == enumKeyCodes::KEY_One)
         return onColorToggle(m_mainColorToggle);
@@ -1215,7 +1232,7 @@ bool GradientLayer::init() {
     // Controls for the progress bar's preview loop, where the icon colour
     // slots are on the first page.
     m_barPreviewToggle = CCMenuItemToggler::createWithStandardSprites(this, menu_selector(GradientLayer::onBarPreviewToggle), 0.4f);
-    m_barPreviewToggle->setPosition({226, 41});
+    m_barPreviewToggle->setPosition({226, 66});
     m_barPreviewToggle->toggle(Mod::get()->getSavedValue<bool>("bar-preview", true));
 
     m_buttonMenu->addChild(m_barPreviewToggle);
@@ -1224,7 +1241,7 @@ bool GradientLayer::init() {
     lbl = CCLabelBMFont::create("preview", "bigFont.fnt");
     lbl->setScale(0.27f);
     lbl->setAnchorPoint({0.f, 0.5f});
-    lbl->setPosition({236, 41});
+    lbl->setPosition({236, 66});
 
     m_mainLayer->addChild(lbl);
     m_barPreviewNodes.push_back(lbl);
@@ -1232,13 +1249,13 @@ bool GradientLayer::init() {
     lbl = CCLabelBMFont::create("speed", "bigFont.fnt");
     lbl->setScale(0.2f);
     lbl->setOpacity(140);
-    lbl->setPosition({224, 28});
+    lbl->setPosition({224, 48});
 
     m_mainLayer->addChild(lbl);
     m_barPreviewNodes.push_back(lbl);
 
     m_barPreviewSlider = Slider::create(this, menu_selector(GradientLayer::onBarPreviewSlider), 0.24f);
-    m_barPreviewSlider->setPosition({266, 28});
+    m_barPreviewSlider->setPosition({266, 48});
     m_barPreviewSlider->setValue(std::clamp(static_cast<float>(Mod::get()->getSavedValue<double>("bar-preview-speed", 0.5)), 0.f, 1.f));
 
     m_mainLayer->addChild(m_barPreviewSlider);
@@ -1247,14 +1264,14 @@ bool GradientLayer::init() {
     lbl = CCLabelBMFont::create("from", "bigFont.fnt");
     lbl->setScale(0.2f);
     lbl->setOpacity(140);
-    lbl->setPosition({229, 15});
+    lbl->setPosition({229, 30});
 
     m_mainLayer->addChild(lbl);
     m_barPreviewNodes.push_back(lbl);
 
     m_barPreviewInput = TextInput::create(50, "0");
     m_barPreviewInput->setScale(0.45f);
-    m_barPreviewInput->setPosition({252, 15});
+    m_barPreviewInput->setPosition({252, 30});
     m_barPreviewInput->setString(std::to_string(std::clamp(Mod::get()->getSavedValue<int>("bar-preview-from", 0), 0, 99)).c_str());
     m_barPreviewInput->getInputNode()->setAllowedChars("0123456789");
     m_barPreviewInput->getInputNode()->setMaxLabelLength(2);
@@ -1265,7 +1282,7 @@ bool GradientLayer::init() {
     lbl = CCLabelBMFont::create("%", "bigFont.fnt");
     lbl->setScale(0.2f);
     lbl->setOpacity(140);
-    lbl->setPosition({268, 15});
+    lbl->setPosition({268, 30});
 
     m_mainLayer->addChild(lbl);
     m_barPreviewNodes.push_back(lbl);
@@ -1275,7 +1292,7 @@ bool GradientLayer::init() {
     spr->setScale(0.3f);
 
     CCMenuItemSpriteExtra* previewStart = CCMenuItemSpriteExtra::create(spr, this, menu_selector(GradientLayer::onBarPreviewStart));
-    previewStart->setPosition({285, 15});
+    previewStart->setPosition({285, 30});
 
     m_buttonMenu->addChild(previewStart);
     m_barPreviewNodes.push_back(previewStart);
@@ -1297,6 +1314,17 @@ bool GradientLayer::init() {
     m_buttonMenu->addChild(m_linearToggle);
 
     m_radialToggle = Utils::createTypeToggle(true, {283.31f, 102}, this, menu_selector(GradientLayer::onTypeToggle));
+
+    // The progress bar's colour buttons take the place of the gradient type
+    // toggles on its page. 3 is the colour for a completed level.
+    for (int i = 0; i < 3; i++) {
+        m_barColorToggles[i] = ColorToggle::create(this, menu_selector(GradientLayer::onBarColorToggle), static_cast<ColorType>(i + 1), this);
+        m_barColorToggles[i]->setPosition({228.31f + 31.f * i, 100});
+        m_barColorToggles[i]->setSelected(i == 0);
+        m_barColorToggles[i]->setVisible(false);
+
+        m_buttonMenu->addChild(m_barColorToggles[i]);
+    }
     m_buttonMenu->addChild(m_radialToggle);
 
     lbl = CCLabelBMFont::create("linear", "bigFont.fnt");

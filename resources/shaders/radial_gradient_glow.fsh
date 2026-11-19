@@ -33,6 +33,16 @@ uniform float u_strength;
 // Multiples of the glow's colour, so it can follow what its sprite does.
 uniform float u_brightness;
 uniform float u_saturation;
+
+// Level-complete animations. 0: none. 1: the gradient repeats along the bar
+// and scrolls right, each copy mirrored so it runs into the next without a
+// seam. 2: a band of light sweeps across.
+uniform int u_anim;
+uniform float u_animPhase;
+// Copies across the bar for 1, width of the light for 2.
+uniform float u_animSize;
+// Fades everything to white, for the flash on completion.
+uniform float u_white;
 // How much light the glow adds on top of the sprite itself.
 uniform float u_inner;
 
@@ -60,6 +70,11 @@ vec4 gradientColor(vec2 uv) {
     }
 
     return finalColor / max(totalWeight, 1e-5);
+}
+
+// Bar gradients are always linear, so a radial one just stays still.
+vec4 animatedColor(vec2 uv) {
+    return gradientColor(uv);
 }
 
 float alphaAt(vec2 coord) {
@@ -112,10 +127,11 @@ void main() {
 
     // Premultiplied: around the sprite this blends over the background, on
     // top of the sprite it only adds light.
-    vec3 color = gradientColor(uv).rgb;
+    vec3 color = animatedColor(uv).rgb;
     float luma = dot(color, vec3(0.299, 0.587, 0.114));
 
     color = mix(vec3(luma), color, u_saturation) * u_brightness;
+    color = mix(color, vec3(1.0), u_white);
 
     gl_FragColor = vec4(color * (outer + inner), outer * 0.85) * v_fragmentColor.a;
 }

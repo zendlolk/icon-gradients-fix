@@ -63,12 +63,14 @@ struct GlowSettings {
 // How the progress bar's glow changes while playing.
 struct BarGlowEffects {
     // Glow grows from nothing as the bar fills.
-    bool buildUp = false;
+    // The bar starts in its second colour and blends to its first as it fills.
+    bool shiftColours = false;
     bool buildExponential = false;
     float buildPower = 2.f; // only when exponential: higher = later and steeper
 
-    // The bar starts in its second colour and blends to its first.
-    bool buildColour = false;
+    // Part of shifting colours: the glow grows from nothing along the same
+    // curve.
+    bool glowBuildUp = false;
 
     // Glow pulses, faster the closer the bar is to full.
     bool flash = false;
@@ -87,6 +89,14 @@ struct BarGlowEffects {
     // level has to be played first.
     bool flashFromStartPos = false;
     float startPosOffset = 0.5f;
+
+    // When the level is complete the bar changes to its third colour.
+    bool complete = false;
+    bool completeFlash = true; // flash white first
+    float completeFade = 0.3f; // 0 to 1: how long the change takes
+    int completeAnim = 0; // 0 none, 1 scroll, 2 shine
+    float animSpeed = 0.4f; // 0 to 1
+    float animSize = 0.3f; // 0 to 1
 };
 
 // The sprites that make up a progress bar with this mod's effects: its fill,
@@ -97,6 +107,22 @@ struct BarSprites {
     CCSprite* overlay = nullptr;
     CCSprite* glow = nullptr;
     CCSprite* overlayGlow = nullptr;
+    CCSprite* complete = nullptr;
+    CCSprite* completeGlow = nullptr;
+};
+
+// Where a progress bar is, for its effects.
+struct BarState {
+    float progress = 0.f;
+    float flashCycles = 0.f;
+    bool flashing = false;
+    // From the second colour (0) to the first (1), or below 0 to follow the
+    // effects.
+    float mix = -1.f;
+    // Seconds since the level was completed, or below 0.
+    float completeTime = -1.f;
+    // Shows the completion colour whatever the settings, for editing it.
+    bool forceComplete = false;
 };
 
 struct SimplePoint {

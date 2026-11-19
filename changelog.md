@@ -5,7 +5,9 @@
 * soft glow with gain and size for icons, the progress bar and the wave trail, set from a row at the bottom of the editor
 * glow can be linked so the second player always matches the first
 * progress bar glow can build up as the bar fills and flash near the end, with options for start positions
-* progress bar can start in a second colour and blend to the first as it builds up, and brightens and saturates with its glow when it flashes
+* progress bar can shift from a second colour to its first as it fills, with an optional glow build-up along the same curve
+* progress bar brightens and saturates with its glow when it flashes
+* progress bar can change to a third colour when the level is complete, with a white flash and a scrolling or shining animation that its glow follows
 * added a progress bar page to the gradient editor (arrow on the right of the menu), so the level progress bar can have a gradient too
 * fixed crash when the robot or spider gets rebuilt during a level (e.g. switching start positions)
 

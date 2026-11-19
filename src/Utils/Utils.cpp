@@ -181,44 +181,43 @@ GradientConfig Utils::getDefaultBarConfig() {
     };
 }
 
-// The bar's second colour, which an empty bar starts in when it builds up.
-// Until it has been set, it is the same as the first.
-GradientConfig Utils::getSavedBarConfig2() {
+// The bar's colours: 0 is its main one, 1 the one it can start in while
+// shifting colours, 2 the one it changes to when the level is complete.
+// Colours that have not been set yet are the same as the main one. Bar
+// gradients always run along the bar.
+static const char* barColourKey(int index) {
+    switch (index) {
+        case 1: return "bar2";
+        case 2: return "bar3";
+        default: return "bar";
+    }
+}
+
+GradientConfig Utils::getSavedBarConfig(int index) {
+    index = std::clamp(index, 0, 2);
+
     if (Mod::get()->hasSavedValue("progress-bar")) {
         matjson::Value container = Mod::get()->getSavedValue<matjson::Value>("progress-bar");
 
-        if (container.contains("bar2"))
-            return configFromObject(container["bar2"]);
+        if (container.contains(barColourKey(index))) {
+            GradientConfig config = configFromObject(container[barColourKey(index)]);
+            config.isLinear = true;
+
+            return config;
+        }
     }
 
-    return getSavedBarConfig();
+    return index == 0 ? getDefaultBarConfig() : getSavedBarConfig(0);
 }
 
-void Utils::saveBarConfig2(GradientConfig config) {
-    for (SimplePoint& point : config.points)
-        point.pos.y = 0.5f;
-
-    saveConfig(config, "progress-bar", "bar2");
-}
-
-GradientConfig Utils::getSavedBarConfig() {
-    if (!Mod::get()->hasSavedValue("progress-bar"))
-        return getDefaultBarConfig();
-
-    matjson::Value container = Mod::get()->getSavedValue<matjson::Value>("progress-bar");
-
-    if (!container.contains("bar"))
-        return getDefaultBarConfig();
-
-    return configFromObject(container["bar"]);
-}
-
-void Utils::saveBarConfig(GradientConfig config) {
+void Utils::saveBarConfig(GradientConfig config, int index) {
     // Bar points only move along the bar; keep older saves on that line too.
     for (SimplePoint& point : config.points)
         point.pos.y = 0.5f;
 
-    saveConfig(config, "progress-bar", "bar");
+    config.isLinear = true;
+
+    saveConfig(config, "progress-bar", barColourKey(std::clamp(index, 0, 2)));
 }
 
 // CCDrawNode::ensureCapacity is private, but it is the only safe way to grow
@@ -722,6 +721,8 @@ void Utils::applyBarGradient(CCSprite* sprite, GradientConfig config, bool inGam
     glUniform1i(tint, config.isEmpty(ColorType::Main, false) ? 1 : 0);
     glUniform1f(glGetUniformLocation(id, "u_brightness"), 1.f);
     glUniform1f(glGetUniformLocation(id, "u_saturation"), 1.f);
+    glUniform1i(glGetUniformLocation(id, "u_anim"), 0);
+    glUniform1f(glGetUniformLocation(id, "u_white"), 0.f);
 }
 
 matjson::Value Utils::getSaveObject(GradientConfig config) {
@@ -1393,6 +1394,8 @@ static CCGLProgram* setGlowUniforms(CCSprite* glow, const GlowSettings& settings
     glUniform1f(glGetUniformLocation(id, "u_strength"), 1.f);
     glUniform1f(glGetUniformLocation(id, "u_brightness"), 1.f);
     glUniform1f(glGetUniformLocation(id, "u_saturation"), 1.f);
+    glUniform1i(glGetUniformLocation(id, "u_anim"), 0);
+    glUniform1f(glGetUniformLocation(id, "u_white"), 0.f);
     // Light added on top of the sprite itself. It has a ceiling, so a high
     // gain strengthens the glow around the sprite without washing the sprite
     // out. A bigger glow is allowed a little more.
@@ -1607,35 +1610,42 @@ void Utils::setupBar(BarSprites& bar, CCSprite* fill, const CCRect& fullRect, bo
         fullRect.size.height * scale
     );
 
-    GradientConfig primary = getSavedBarConfig();
-    GradientConfig secondary = getSavedBarConfig2();
+    GradientConfig primary = getSavedBarConfig(0);
+    GradientConfig secondary = getSavedBarConfig(1);
+    GradientConfig completed = getSavedBarConfig(2);
     GlowSettings glow = getGlow(GlowTarget::Bar, false);
 
     applyBarGradient(fill, primary, inGame, &fullRectPixels, 800);
 
-    // A copy of the fill on top of it, in the second colour. Fading it out
-    // blends the bar from the second colour to the first.
-    CCSprite* overlay = typeinfo_cast<CCSprite*>(fill->getChildByID("bar-secondary"_spr));
+    // Copies of the fill on top of it, in the other colours. Fading one in
+    // or out blends the bar between colours.
+    auto layer = [&](const char* id, int z, const GradientConfig& config, int shaderID) {
+        CCSprite* copy = typeinfo_cast<CCSprite*>(fill->getChildByID(id));
 
-    if (!overlay) {
-        overlay = CCSprite::createWithTexture(fill->getTexture());
-        overlay->setID("bar-secondary"_spr);
-        overlay->setAnchorPoint({0.f, 0.f});
+        if (!copy) {
+            copy = CCSprite::createWithTexture(fill->getTexture());
+            copy->setID(id);
+            copy->setAnchorPoint({0.f, 0.f});
 
-        fill->addChild(overlay, 1);
-    }
+            fill->addChild(copy, z);
+        }
 
-    overlay->setTextureRect(fill->getTextureRect());
-    overlay->setPosition({0.f, 0.f});
-    overlay->setColor(fill->getColor());
-    overlay->setVisible(false);
+        copy->setTextureRect(fill->getTextureRect());
+        copy->setPosition({0.f, 0.f});
+        copy->setColor(fill->getColor());
+        copy->setVisible(false);
 
-    applyBarGradient(overlay, secondary, inGame, &fullRectPixels, 802);
+        applyBarGradient(copy, config, inGame, &fullRectPixels, shaderID);
+
+        return copy;
+    };
 
     bar.fill = fill;
-    bar.overlay = overlay;
+    bar.overlay = layer("bar-secondary"_spr, 1, secondary, 802);
+    bar.complete = layer("bar-complete"_spr, 2, completed, 804);
     bar.glow = updateBarGlow(fill, fullRect, primary, inGame, glow, 801);
-    bar.overlayGlow = updateBarGlow(overlay, fullRect, secondary, inGame, glow, 803);
+    bar.overlayGlow = updateBarGlow(bar.overlay, fullRect, secondary, inGame, glow, 803);
+    bar.completeGlow = updateBarGlow(bar.complete, fullRect, completed, inGame, glow, 805);
 }
 
 // How far the build-up has got: 0 for an empty bar, 1 for a full one.
@@ -1646,34 +1656,105 @@ float Utils::getBarBuild(const BarGlowEffects& effects, float progress) {
 // Puts a bar and its glows in the state for this point of the level.
 // `mix` is how far it is from the second colour (0) to the first (1); left
 // out, it follows the build-up.
-void Utils::updateBarEffects(const BarSprites& bar, const BarGlowEffects& effects, float progress, float flashCycles, bool flashing, float mix) {
+void Utils::updateBarEffects(const BarSprites& bar, const BarGlowEffects& effects, const BarState& state) {
     if (!bar.fill) return;
 
-    if (mix < 0.f)
-        mix = effects.buildUp && effects.buildColour ? getBarBuild(effects, progress) : 1.f;
+    float mix = state.mix >= 0.f
+        ? state.mix
+        : effects.shiftColours ? getBarBuild(effects, state.progress) : 1.f;
 
-    float strength = getBarGlowStrength(effects, progress, flashCycles, flashing);
+    float strength = getBarGlowStrength(effects, state.progress, state.flashCycles, state.flashing);
 
-    auto [brightness, saturation] = getBarLook(effects, flashCycles, flashing);
+    auto [brightness, saturation] = getBarLook(effects, state.flashCycles, state.flashing);
 
-    setBarFillLook(bar.fill, brightness, saturation);
+    // Level complete: the third colour covers the others, after a flash of
+    // white or by fading in.
+    float complete = 0.f;
+    float white = 0.f;
 
-    if (bar.overlay) {
-        bool shown = mix < 0.999f;
+    int anim = 0;
+    float animPhase = 0.f;
+    float animSize = 1.f;
 
-        bar.overlay->setVisible(shown);
+    if ((effects.complete || state.forceComplete) && state.completeTime >= 0.f) {
+        float change = std::clamp(state.completeTime / getBarCompleteFade(effects), 0.f, 1.f);
 
-        if (shown) {
-            bar.overlay->setTextureRect(bar.fill->getTextureRect());
-            bar.overlay->setOpacity(static_cast<GLubyte>((1.f - mix) * 255.f));
+        change = change * change * (3.f - 2.f * change);
 
-            setBarFillLook(bar.overlay, brightness, saturation);
+        if (effects.completeFlash) {
+            complete = 1.f;
+            white = 1.f - change;
+        } else
+            complete = change;
+
+        anim = effects.completeAnim;
+
+        if (anim == 1) {
+            animPhase = std::fmod(state.completeTime * (0.2f + effects.animSpeed * 2.8f), 2.f);
+            animSize = 1.f + effects.animSize * 7.f;
+        } else if (anim == 2) {
+            animPhase = std::fmod(state.completeTime * (0.25f + effects.animSpeed * 1.25f), 1.f);
+            animSize = 0.03f + effects.animSize * 0.2f;
         }
     }
 
+    setBarFillLook(bar.fill, brightness, saturation);
+
+    auto showLayer = [&](CCSprite* layer, float amount) {
+        if (!layer) return;
+
+        bool shown = amount > 0.001f;
+
+        layer->setVisible(shown);
+
+        if (!shown) return;
+
+        layer->setTextureRect(bar.fill->getTextureRect());
+        layer->setOpacity(static_cast<GLubyte>(std::clamp(amount, 0.f, 1.f) * 255.f));
+
+        setBarFillLook(layer, brightness, saturation);
+    };
+
+    // The second colour is only worth drawing when it shows through.
+    showLayer(bar.overlay, complete < 0.999f ? 1.f - mix : 0.f);
+    showLayer(bar.complete, complete);
+
+    setBarAnim(bar.complete, anim, animPhase, animSize, white);
+
     // Each glow in its own colour, together as strong as one.
-    setBarGlowState(bar.glow, progress, strength * mix, brightness, saturation);
-    setBarGlowState(bar.overlayGlow, progress, strength * (1.f - mix), brightness, saturation);
+    float rest = 1.f - complete;
+
+    setBarGlowState(bar.glow, state.progress, strength * mix * rest, brightness, saturation);
+    setBarGlowState(bar.overlayGlow, state.progress, strength * (1.f - mix) * rest, brightness, saturation);
+    setBarGlowState(bar.completeGlow, state.progress, strength * complete, brightness, saturation);
+
+    setBarAnim(bar.completeGlow, anim, animPhase, animSize, white);
+}
+
+// The completion animation and white flash, on a bar layer or its glow.
+void Utils::setBarAnim(CCSprite* sprite, int anim, float phase, float size, float white) {
+    if (!sprite || !sprite->isVisible()) return;
+
+    CCGLProgram* program = sprite->getShaderProgram();
+
+    if (!program) return;
+
+    GLuint id = program->getProgram();
+    GLint location = glGetUniformLocation(id, "u_anim");
+
+    if (location < 0) return;
+
+    program->use();
+
+    glUniform1i(location, anim);
+    glUniform1f(glGetUniformLocation(id, "u_animPhase"), phase);
+    glUniform1f(glGetUniformLocation(id, "u_animSize"), size);
+    glUniform1f(glGetUniformLocation(id, "u_white"), white);
+}
+
+// How long the change to the completion colour takes, in seconds.
+float Utils::getBarCompleteFade(const BarGlowEffects& effects) {
+    return 0.15f + effects.completeFade * 1.85f;
 }
 
 BarGlowEffects Utils::getBarGlowEffects() {
@@ -1688,10 +1769,10 @@ BarGlowEffects Utils::getBarGlowEffects() {
         return std::clamp(static_cast<float>(saved[key].asDouble().unwrapOr(fallback)), min, max);
     };
 
-    effects.buildUp = saved["build-up"].asBool().unwrapOr(effects.buildUp);
+    effects.shiftColours = saved["build-up"].asBool().unwrapOr(effects.shiftColours);
     effects.buildExponential = saved["build-exponential"].asBool().unwrapOr(effects.buildExponential);
     effects.buildPower = number("build-power", effects.buildPower, 1.f, 6.f);
-    effects.buildColour = saved["build-colour"].asBool().unwrapOr(effects.buildColour);
+    effects.glowBuildUp = saved["glow-build-up"].asBool().unwrapOr(effects.glowBuildUp);
     effects.flash = saved["flash"].asBool().unwrapOr(effects.flash);
     effects.flashStart = number("flash-start", effects.flashStart, 0.f, 1.f);
     effects.flashSpeed = number("flash-speed", effects.flashSpeed, 0.f, 1.f);
@@ -1702,6 +1783,12 @@ BarGlowEffects Utils::getBarGlowEffects() {
     effects.flashSaturate = number("flash-saturate", effects.flashSaturate, 0.f, 1.f);
     effects.flashFromStartPos = saved["flash-start-pos"].asBool().unwrapOr(effects.flashFromStartPos);
     effects.startPosOffset = number("start-pos-offset", effects.startPosOffset, 0.f, 1.f);
+    effects.complete = saved["complete"].asBool().unwrapOr(effects.complete);
+    effects.completeFlash = saved["complete-flash"].asBool().unwrapOr(effects.completeFlash);
+    effects.completeFade = number("complete-fade", effects.completeFade, 0.f, 1.f);
+    effects.completeAnim = std::clamp(static_cast<int>(saved["complete-anim"].asInt().unwrapOr(effects.completeAnim)), 0, 2);
+    effects.animSpeed = number("anim-speed", effects.animSpeed, 0.f, 1.f);
+    effects.animSize = number("anim-size", effects.animSize, 0.f, 1.f);
 
     return effects;
 }
@@ -1709,10 +1796,10 @@ BarGlowEffects Utils::getBarGlowEffects() {
 void Utils::saveBarGlowEffects(const BarGlowEffects& effects) {
     matjson::Value saved = matjson::Value{};
 
-    saved["build-up"] = effects.buildUp;
+    saved["build-up"] = effects.shiftColours;
     saved["build-exponential"] = effects.buildExponential;
     saved["build-power"] = effects.buildPower;
-    saved["build-colour"] = effects.buildColour;
+    saved["glow-build-up"] = effects.glowBuildUp;
     saved["flash"] = effects.flash;
     saved["flash-start"] = effects.flashStart;
     saved["flash-speed"] = effects.flashSpeed;
@@ -1723,6 +1810,12 @@ void Utils::saveBarGlowEffects(const BarGlowEffects& effects) {
     saved["flash-saturate"] = effects.flashSaturate;
     saved["flash-start-pos"] = effects.flashFromStartPos;
     saved["start-pos-offset"] = effects.startPosOffset;
+    saved["complete"] = effects.complete;
+    saved["complete-flash"] = effects.completeFlash;
+    saved["complete-fade"] = effects.completeFade;
+    saved["complete-anim"] = effects.completeAnim;
+    saved["anim-speed"] = effects.animSpeed;
+    saved["anim-size"] = effects.animSize;
 
     Mod::get()->setSavedValue("bar-glow-effects", saved);
 }
@@ -1784,7 +1877,7 @@ void Utils::setBarFillLook(CCSprite* fill, float brightness, float saturation) {
 // Glow strength from 0 to 1 of what was set. A flash only ever dims the
 // glow, so its peak is never brighter than the setting.
 float Utils::getBarGlowStrength(const BarGlowEffects& effects, float progress, float flashCycles, bool flashing) {
-    float strength = effects.buildUp ? getBarBuild(effects, progress) : 1.f;
+    float strength = effects.shiftColours && effects.glowBuildUp ? getBarBuild(effects, progress) : 1.f;
 
     if (flashing) {
         // In step with the bar: the glow is full when the bar is brightest

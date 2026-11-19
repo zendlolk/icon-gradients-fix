@@ -12,6 +12,7 @@ void ProPlayLayer::resetLevel() {
 
     f->m_runStart = -1.f;
     f->m_flashCycles = 0.f;
+    f->m_completeTime = -1.f;
 }
 
 void ProPlayLayer::updateBarGradient(float dt) {
@@ -21,7 +22,9 @@ void ProPlayLayer::updateBarGradient(float dt) {
 
     // The glow and the effects follow the bar as it fills.
     if (f->m_barGradientApplied) {
-        if (!f->m_barGlow && !f->m_barEffects.buildUp && !f->m_barEffects.flash) return;
+        const BarGlowEffects& effects = f->m_barEffects;
+
+        if (!f->m_barGlow && !effects.shiftColours && !effects.flash && !effects.complete) return;
 
         float progress = std::clamp(m_progressFill->getTextureRect().size.width / m_progressWidth, 0.f, 1.f);
 
@@ -37,9 +40,27 @@ void ProPlayLayer::updateBarGradient(float dt) {
         else
             f->m_flashCycles = 0.f;
 
+        // Once the bar is full the level is complete, until the next attempt.
+        if (effects.complete) {
+            if (f->m_completeTime >= 0.f)
+                f->m_completeTime += dt;
+            else if (progress >= 0.995f)
+                f->m_completeTime = 0.f;
+        }
+
+        BarState state;
+
+        state.progress = progress;
+        state.flashCycles = f->m_flashCycles;
+        state.flashing = rate > 0.f;
+        state.completeTime = f->m_completeTime;
+
         Utils::updateBarEffects(
-            { m_progressFill, f->m_barOverlay, f->m_barGlow, f->m_barOverlayGlow },
-            f->m_barEffects, progress, f->m_flashCycles, rate > 0.f
+            {
+                m_progressFill, f->m_barOverlay, f->m_barGlow, f->m_barOverlayGlow,
+                f->m_barComplete, f->m_barCompleteGlow
+            },
+            effects, state
         );
 
         return;
@@ -58,10 +79,12 @@ void ProPlayLayer::updateBarGradient(float dt) {
     f->m_barGlow = bar.glow;
     f->m_barOverlay = bar.overlay;
     f->m_barOverlayGlow = bar.overlayGlow;
+    f->m_barComplete = bar.complete;
+    f->m_barCompleteGlow = bar.completeGlow;
     f->m_barEffects = Utils::getBarGlowEffects();
 
     // Until the next frame works out the real values.
-    Utils::updateBarEffects(bar, f->m_barEffects, 0.f, 0.f, false);
+    Utils::updateBarEffects(bar, f->m_barEffects, BarState{});
 }
 
 void ProPlayLayer::postUpdate(float dt) {

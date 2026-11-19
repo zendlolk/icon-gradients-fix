@@ -19,9 +19,14 @@ private:
     CCSprite* m_barGlow = nullptr;
     CCSprite* m_barOverlay = nullptr;
     CCSprite* m_barOverlayGlow = nullptr;
+    CCSprite* m_barComplete = nullptr;
+    CCSprite* m_barCompleteGlow = nullptr;
 
-    // Shows the bar's second colour while it is being edited.
-    bool m_barEditingSecondary = false;
+    // Which of the bar's colours is being edited, so it can be shown.
+    int m_barEditing = 0;
+
+    // Keeps the completion animation running while it is shown.
+    float m_barAnimClock = 0.f;
 
     CCSize m_barFullSize = { 0.f, 0.f };
 
@@ -73,7 +78,7 @@ private:
     void createWave();
 
     void updateBarPreview(float);
-    void setBarPreviewFill(float, float = 0.f, bool = false, float = -1.f);
+    void setBarPreviewFill(float, float = 0.f, bool = false, float = -1.f, float = -1.f, bool = false);
 
     bool isBarPreviewPlaying();
     bool dragBarPreview(CCTouch*, bool);

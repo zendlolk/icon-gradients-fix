@@ -71,7 +71,7 @@ void PointsLayer::createBar() {
     m_bar = CCNode::create();
     m_bar->setContentSize(grooveSize);
     m_bar->setAnchorPoint({0.5f, 0.5f});
-    m_bar->setPosition({178.5f, 200});
+    m_bar->setPosition({178.5f, 226});
     m_bar->setScale(std::min(1.15f, 235.f / grooveSize.width));
     m_bar->setVisible(false);
 
@@ -178,7 +178,7 @@ bool PointsLayer::isBarPreviewPlaying() {
     return m_page == EditorPage::Bar
         && m_barPreviewEnabled
         && m_barFill
-        && (m_barEffects.buildUp || m_barEffects.flash);
+        && (m_barEffects.shiftColours || m_barEffects.flash || m_barEffects.complete);
 }
 
 // Lets the preview bar be grabbed and dragged to any point. `begin` is for a
@@ -208,14 +208,23 @@ bool PointsLayer::dragBarPreview(CCTouch* touch, bool begin) {
 }
 
 // Shows the preview bar filled to `progress` with its glow at `strength`.
-void PointsLayer::setBarPreviewFill(float progress, float flashCycles, bool flashing, float mix) {
+void PointsLayer::setBarPreviewFill(float progress, float flashCycles, bool flashing, float mix, float completeTime, bool forceComplete) {
     if (!m_barFill) return;
 
     m_barFill->setTextureRect({ 0.f, 0.f, m_barFullSize.width * progress, m_barFullSize.height });
 
+    BarState state;
+
+    state.progress = progress;
+    state.flashCycles = flashCycles;
+    state.flashing = flashing;
+    state.mix = mix;
+    state.completeTime = completeTime;
+    state.forceComplete = forceComplete;
+
     Utils::updateBarEffects(
-        { m_barFill, m_barOverlay, m_barGlow, m_barOverlayGlow },
-        m_barEffects, progress, flashCycles, flashing, mix
+        { m_barFill, m_barOverlay, m_barGlow, m_barOverlayGlow, m_barComplete, m_barCompleteGlow },
+        m_barEffects, state
     );
 }
 
@@ -224,26 +233,35 @@ void PointsLayer::setBarPreviewFill(float progress, float flashCycles, bool flas
 void PointsLayer::updateBarPreview(float dt) {
     if (!m_barFill || m_page != EditorPage::Bar) return;
 
+    m_barAnimClock = std::fmod(m_barAnimClock + dt, 600.f);
+
     if (!isBarPreviewPlaying()) {
         m_barPreviewTime = 0.f;
         m_barFlashCycles = 0.f;
         m_barDragging = false;
 
-        // A full bar, in whichever colour is being edited.
-        return setBarPreviewFill(1.f, 0.f, false, m_barEditingSecondary ? 0.f : 1.f);
+        // A full bar, in whichever colour is being edited. The completion
+        // colour plays its animation.
+        if (m_barEditing == 2)
+            return setBarPreviewFill(1.f, 0.f, false, 1.f, 10.f + m_barAnimClock, true);
+
+        return setBarPreviewFill(1.f, 0.f, false, m_barEditing == 1 ? 0.f : 1.f);
     }
 
-    // Fills from the chosen starting point, pauses while full, then loops.
+    // Fills from the chosen starting point, holds while full, then loops.
     // A whole bar takes between 12 seconds and 1.5, by the speed setting.
     float duration = 12.f - 10.5f * m_barPreviewSpeed;
-    float span = std::max(0.01f, 1.f - m_barPreviewFrom);
+    float fillTime = duration * std::max(0.01f, 1.f - m_barPreviewFrom);
+
+    // Long enough to see the level-complete change and its animation.
+    float hold = m_barEffects.complete ? Utils::getBarCompleteFade(m_barEffects) + 3.f : 1.f;
 
     // Held in place while it is being dragged. The time can be below zero
     // after a drag to before the starting point; it just counts up from there.
     if (!m_barDragging) {
         m_barPreviewTime += dt;
 
-        if (m_barPreviewTime >= duration * span + 1.f)
+        if (m_barPreviewTime >= fillTime + hold)
             m_barPreviewTime = 0.f;
     }
 
@@ -255,7 +273,10 @@ void PointsLayer::updateBarPreview(float dt) {
     else
         m_barFlashCycles = 0.f;
 
-    setBarPreviewFill(progress, m_barFlashCycles, rate > 0.f);
+    // The level counts as complete from the moment the bar is full.
+    float completeTime = progress >= 0.999f ? std::max(0.f, m_barPreviewTime - fillTime) : -1.f;
+
+    setBarPreviewFill(progress, m_barFlashCycles, rate > 0.f, -1.f, completeTime);
 }
 
 // The rect gradient points are positioned relative to.
@@ -561,8 +582,10 @@ void PointsLayer::updateGradient(GradientConfig config, ColorType colorType, boo
         m_barGlow = bar.glow;
         m_barOverlay = bar.overlay;
         m_barOverlayGlow = bar.overlayGlow;
+        m_barComplete = bar.complete;
+        m_barCompleteGlow = bar.completeGlow;
         m_barEffects = Utils::getBarGlowEffects();
-        m_barEditingSecondary = colorType == ColorType::Secondary;
+        m_barEditing = std::clamp(static_cast<int>(colorType) - 1, 0, 2);
 
         updateBarPreview(0.f);
 
