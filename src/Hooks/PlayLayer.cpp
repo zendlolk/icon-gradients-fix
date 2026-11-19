@@ -30,17 +30,36 @@ void ProPlayLayer::destroyPlayer(PlayerObject* player, GameObject* object) {
 
     f->m_deathTime = 0.f;
 
-    // Cracking and shattering break up the whole bar, frame and all.
-    if (effects.deathStyle == 1 || effects.deathStyle == 2) {
+    if (effects.deathStyle == 1 || effects.deathStyle == 2)
         clearBarPieces();
 
-        f->m_barPieces = Utils::shatterBar(m_progressBar, effects.deathStyle);
+    // Cracks spread over the bar, which stays where it is.
+    if (effects.deathStyle == 1 && m_progressBar) {
+        f->m_cracksDone = Utils::makeCracks(m_progressBar->getContentSize(), f->m_crackSegments);
+        f->m_cracksGrowing = true;
+
+        f->m_barCracks = CCDrawNode::create();
+        f->m_barCracks->setID("bar-cracks"_spr);
+
+        m_progressBar->addChild(f->m_barCracks, 100);
     }
+
+    // The whole bar, frame and all, flies apart.
+    if (effects.deathStyle == 2)
+        f->m_barPieces = Utils::shatterBar(m_progressBar);
 }
 
 // Puts the bar back together for a new attempt.
 void ProPlayLayer::clearBarPieces() {
     auto f = m_fields.self();
+
+    if (f->m_barCracks) {
+        f->m_barCracks->removeFromParentAndCleanup(true);
+        f->m_barCracks = nullptr;
+    }
+
+    f->m_crackSegments.clear();
+    f->m_cracksGrowing = false;
 
     if (!f->m_barPieces) return;
 
@@ -100,6 +119,14 @@ void ProPlayLayer::updateBarGradient(float dt) {
 
         if (f->m_deathTime >= 0.f)
             f->m_deathTime += dt;
+
+        // Cracks are only redrawn while they are still growing.
+        if (f->m_cracksGrowing && f->m_barCracks) {
+            Utils::drawCracks(f->m_barCracks, f->m_crackSegments, f->m_deathTime);
+
+            if (f->m_deathTime > f->m_cracksDone)
+                f->m_cracksGrowing = false;
+        }
 
         f->m_lastProgress = progress;
         f->m_lastFlashing = rate > 0.f;

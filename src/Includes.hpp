@@ -134,6 +134,15 @@ struct BarState {
     float deathTime = -1.f;
 };
 
+// One line of a crack across the progress bar, drawn growing from `from` to
+// `to` between `start` and `end` seconds into the crack.
+struct CrackSegment {
+    CCPoint from;
+    CCPoint to;
+    float start;
+    float end;
+};
+
 struct SimplePoint {
     CCPoint pos;
     ccColor3B color;

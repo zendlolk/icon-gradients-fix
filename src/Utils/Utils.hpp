@@ -76,7 +76,9 @@ public:
     
     static CCGLProgram* createShader(const std::string&, bool, bool, bool, bool = false, bool = false);
     
-    static CCNode* shatterBar(CCSprite*, int);
+    static CCNode* shatterBar(CCSprite*);
+    static float makeCracks(const CCSize&, std::vector<CrackSegment>&);
+    static void drawCracks(CCDrawNode*, const std::vector<CrackSegment>&, float);
 
     static void patchBatchNode(CCSpriteBatchNode*);
     static void hideSprite(CCSprite*);

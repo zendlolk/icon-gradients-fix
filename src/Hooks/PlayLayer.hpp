@@ -23,8 +23,14 @@ class $modify(ProPlayLayer, PlayLayer) {
 
         bool m_barTicking = false;
 
-        // The pieces of a cracked or shattered bar, while they fall.
+        // The pieces of a shattered bar, while they fall.
         Ref<CCNode> m_barPieces = nullptr;
+
+        // Cracks spreading over the bar, and when they are done growing.
+        Ref<CCDrawNode> m_barCracks = nullptr;
+        std::vector<CrackSegment> m_crackSegments;
+        float m_cracksDone = 0.f;
+        bool m_cracksGrowing = false;
 
         BarGlowEffects m_barEffects;
 

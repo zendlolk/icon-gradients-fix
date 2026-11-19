@@ -1988,13 +1988,103 @@ static float randomBetween(float min, float max) {
     return min + (max - min) * (static_cast<float>(std::rand()) / RAND_MAX);
 }
 
-// Breaks a whole progress bar, frame and all, into pieces that fall apart:
-// 1 cracks it into three, 2 shatters it into many. The bar is drawn once
-// into a texture, and each piece is a sprite of it cut to shape by a shader,
-// moved by actions. Returns the node holding the pieces, which takes the
-// bar's place; the bar itself is hidden. Nothing is done per frame here.
-CCNode* Utils::shatterBar(CCSprite* bar, int style) {
-    if (!bar || !bar->getParent() || style < 1 || style > 2) return nullptr;
+// Works out cracks spreading across a bar of the given size from a few
+// points of impact, kept inside the bar. Returns when the last one finishes
+// growing, in seconds.
+float Utils::makeCracks(const CCSize& size, std::vector<CrackSegment>& out) {
+    out.clear();
+
+    if (size.width < 2.f || size.height < 2.f) return 0.f;
+
+    const float margin = 0.8f;
+
+    auto inside = [&](CCPoint point, CCPoint& direction) {
+        if (point.y < margin || point.y > size.height - margin) {
+            point.y = std::clamp(point.y, margin, size.height - margin);
+            direction.y = -direction.y;
+        }
+
+        if (point.x < margin || point.x > size.width - margin) {
+            point.x = std::clamp(point.x, margin, size.width - margin);
+            direction.x = -direction.x;
+        }
+
+        return point;
+    };
+
+    float finish = 0.f;
+
+    // A line that wanders on from `point`, sometimes splitting.
+    std::function<void(CCPoint, float, float, int, int)> grow = [&](CCPoint point, float angle, float time, int steps, int depth) {
+        CCPoint direction = ccp(std::cos(angle), std::sin(angle) * 0.6f);
+
+        for (int step = 0; step < steps; step++) {
+            float turn = randomBetween(-0.55f, 0.55f);
+
+            direction = ccp(
+                direction.x * std::cos(turn) - direction.y * std::sin(turn),
+                direction.x * std::sin(turn) + direction.y * std::cos(turn)
+            );
+
+            float length = randomBetween(size.height * 0.3f, size.height * 0.75f);
+
+            CCPoint next = inside(point + direction * length, direction);
+            float duration = randomBetween(0.025f, 0.05f);
+
+            out.push_back({ point, next, time, time + duration });
+
+            finish = std::max(finish, time + duration);
+
+            if (depth < 2 && std::rand() % 100 < 28)
+                grow(next, std::atan2(direction.y, direction.x) + randomBetween(0.6f, 1.2f) * (std::rand() % 2 ? 1.f : -1.f), time + duration, 2 + std::rand() % 3, depth + 1);
+
+            point = next;
+            time += duration;
+        }
+    };
+
+    int impacts = 3 + std::rand() % 2;
+
+    for (int i = 0; i < impacts; i++) {
+        CCPoint impact = ccp(
+            size.width * randomBetween(0.08f + 0.84f * i / impacts, 0.08f + 0.84f * (i + 1) / impacts),
+            size.height * randomBetween(0.3f, 0.7f)
+        );
+
+        float delay = randomBetween(0.f, 0.08f);
+        int branches = 5 + std::rand() % 3;
+
+        for (int branch = 0; branch < branches; branch++)
+            grow(impact, 6.2831853f * (branch + randomBetween(-0.3f, 0.3f)) / branches, delay, 3 + std::rand() % 4, 0);
+    }
+
+    return finish;
+}
+
+// Draws the cracks as far as they have grown `time` seconds in.
+void Utils::drawCracks(CCDrawNode* node, const std::vector<CrackSegment>& cracks, float time) {
+    if (!node) return;
+
+    node->clear();
+
+    ccColor4F colour = ccc4f(1.f, 1.f, 1.f, 0.9f);
+
+    for (const CrackSegment& crack : cracks) {
+        if (time <= crack.start) continue;
+
+        float grown = std::min(1.f, (time - crack.start) / std::max(0.001f, crack.end - crack.start));
+
+        node->drawSegment(crack.from, crack.from + (crack.to - crack.from) * grown, 0.3f, colour);
+    }
+}
+
+// Shatters a whole progress bar, frame and all, into pieces that fly apart.
+// The bar is drawn once into a texture, and each piece is a sprite of it cut
+// to shape by a shader, moved by actions. Returns the node holding the
+// pieces, which takes the bar's place; the bar itself is hidden. Nothing is
+// done per frame here.
+CCNode* Utils::shatterBar(CCSprite* bar) {
+    if (!bar || !bar->getParent()) return nullptr;
 
     CCSize size = bar->getContentSize();
 
@@ -2006,7 +2096,7 @@ CCNode* Utils::shatterBar(CCSprite* bar, int style) {
     CCSize canvas = { size.width + pad * 2.f, size.height + pad * 2.f };
 
     // Cuts across the bar, slanted, as fractions of the canvas width.
-    int pieces = style == 1 ? 3 : 7;
+    const int pieces = 7;
     float slope = 0.7f * canvas.height / canvas.width;
 
     std::vector<float> cuts;
@@ -2023,29 +2113,6 @@ CCNode* Utils::shatterBar(CCSprite* bar, int style) {
 
     if (!texture) return nullptr;
 
-    // Hairline cracks, drawn into the texture so they move with the pieces.
-    CCDrawNode* cracks = CCDrawNode::create();
-    ccColor4F crackColour = ccc4f(0.f, 0.f, 0.f, 0.7f);
-
-    for (int piece = 0; piece < pieces; piece++) {
-        float left = piece == 0 ? pad : cuts[piece - 1] * canvas.width;
-        float right = piece == pieces - 1 ? pad + size.width : cuts[piece] * canvas.width;
-
-        for (int i = 0; i < (style == 1 ? 2 : 1); i++) {
-            bool fromBottom = std::rand() % 2 == 0;
-
-            CCPoint point = ccp(randomBetween(left + 3.f, std::max(left + 3.f, right - 3.f)), fromBottom ? pad : pad + size.height);
-
-            for (int step = 0; step < 3; step++) {
-                CCPoint next = point + ccp(randomBetween(-2.f, 2.f), (fromBottom ? 1.f : -1.f) * randomBetween(1.5f, size.height * 0.25f));
-
-                cracks->drawSegment(point, next, 0.45f, crackColour);
-
-                point = next;
-            }
-        }
-    }
-
     // Draw the bar into the texture where it would be on the canvas.
     CCPoint position = bar->getPosition();
     float scaleX = bar->getScaleX();
@@ -2060,7 +2127,6 @@ CCNode* Utils::shatterBar(CCSprite* bar, int style) {
 
     texture->beginWithClear(0.f, 0.f, 0.f, 0.f);
     bar->visit();
-    cracks->visit();
     texture->end();
 
     bar->setPosition(position);
@@ -2099,7 +2165,7 @@ CCNode* Utils::shatterBar(CCSprite* bar, int style) {
 
     bar->getParent()->addChild(holder, bar->getZOrder());
 
-    float lifetime = style == 1 ? 1.f : 0.85f;
+    const float lifetime = 0.6f;
 
     for (int piece = 0; piece < pieces; piece++) {
         float left = piece == 0 ? 0.f : cuts[piece - 1];
@@ -2128,27 +2194,16 @@ CCNode* Utils::shatterBar(CCSprite* bar, int style) {
 
         // Away from the middle of the bar, more so the further out.
         float side = (centre - 0.5f) * 2.f;
-        float spin = (side >= 0.f ? 1.f : -1.f) * (style == 1 ? randomBetween(3.f, 9.f) : randomBetween(14.f, 40.f));
+        float spin = (side >= 0.f ? 1.f : -1.f) * randomBetween(14.f, 40.f);
 
-        CCFiniteTimeAction* move = style == 1
-            ? static_cast<CCFiniteTimeAction*>(CCEaseIn::create(
-                CCMoveBy::create(lifetime, ccp(side * randomBetween(5.f, 9.f), -randomBetween(14.f, 22.f))), 2.f
-            ))
-            : static_cast<CCFiniteTimeAction*>(CCJumpBy::create(
-                lifetime, ccp(side * randomBetween(8.f, 24.f) + randomBetween(-4.f, 4.f), -randomBetween(18.f, 30.f)), randomBetween(6.f, 14.f), 1
-            ));
+        CCFiniteTimeAction* move = CCJumpBy::create(
+            lifetime, ccp(side * randomBetween(8.f, 24.f) + randomBetween(-4.f, 4.f), -randomBetween(18.f, 30.f)), randomBetween(6.f, 14.f), 1
+        );
 
-        // A crack holds together for a moment before it gives.
-        float hold = style == 1 ? 0.12f : 0.03f;
-
-        sprite->runAction(CCSequence::create(
-            CCDelayTime::create(hold),
-            CCSpawn::create(
-                move,
-                CCEaseIn::create(CCRotateBy::create(lifetime, spin), 1.6f),
-                CCSequence::create(CCDelayTime::create(lifetime * 0.45f), CCFadeOut::create(lifetime * 0.55f), nullptr),
-                nullptr
-            ),
+        sprite->runAction(CCSpawn::create(
+            move,
+            CCEaseOut::create(CCRotateBy::create(lifetime, spin), 1.4f),
+            CCSequence::create(CCDelayTime::create(lifetime * 0.4f), CCFadeOut::create(lifetime * 0.6f), nullptr),
             nullptr
         ));
     }
