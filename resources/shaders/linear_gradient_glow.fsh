@@ -55,6 +55,10 @@ uniform float u_fill;
 uniform vec2 u_barSize;
 uniform float u_sigma;
 
+// 0: soft, fading evenly. 1: tight, full right next to the shape and
+// dropping away fast, with a faint tail.
+uniform int u_glowStyle;
+
 vec4 gradientColor(vec2 uv) {
     if (stopAt <= 1) return colors[0];
 
@@ -106,6 +110,10 @@ float alphaAt(vec2 coord) {
     return texture2D(u_texture, coord).a * inside.x * inside.y;
 }
 
+float edgeAt(float x, float sigma) {
+    return smoothstep(-1.6 * sigma, 1.6 * sigma, x);
+}
+
 float edge(float x) {
     return smoothstep(-1.6 * u_sigma, 1.6 * u_sigma, x);
 }
@@ -116,6 +124,7 @@ void main() {
     float shape = 0.0;
     float blurred = 0.0;
     float lit = 1.0;
+    float core = 0.0;
 
     if (u_mode == 1) {
         vec2 pos = uv * u_barSize;
@@ -123,6 +132,12 @@ void main() {
 
         shape = step(0.0, pos.x) * step(pos.x, width) * step(0.0, pos.y) * step(pos.y, u_barSize.y);
         blurred = edge(pos.x) * edge(width - pos.x) * edge(pos.y) * edge(u_barSize.y - pos.y);
+
+        if (u_glowStyle == 1) {
+            float s = u_sigma * 0.22;
+
+            core = edgeAt(pos.x, s) * edgeAt(width - pos.x, s) * edgeAt(pos.y, s) * edgeAt(u_barSize.y - pos.y, s);
+        }
 
         uv = clamp(uv, vec2(0.0), vec2(u_fill, 1.0));
     } else {
@@ -139,7 +154,12 @@ void main() {
 
     // Around the sprite: the blurred shape, levelling off smoothly instead of
     // hitting a hard ceiling when the gain is high.
-    float outer = (1.0 - exp(-blurred * u_gain * 1.5)) * (1.0 - shape);
+    float outer = 1.0 - exp(-blurred * u_gain * 1.5);
+
+    if (u_glowStyle == 1)
+        outer = max(core * clamp(u_gain * 1.4, 0.0, 1.0), outer * outer * 0.75);
+
+    outer *= 1.0 - shape;
 
     // On the sprite: an even lift in brightness. It does not follow the blur,
     // which would show up as shapes inside the sprite.

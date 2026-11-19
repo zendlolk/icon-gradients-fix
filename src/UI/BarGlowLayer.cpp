@@ -241,7 +241,7 @@ bool BarGlowLayer::init() {
                 m_pages[page].push_back(node);
     }
 
-    updateAnimButtons();
+    updateChoices();
     updateLabels();
     showPage(0);
 
@@ -274,42 +274,78 @@ void BarGlowLayer::buildEffectsPage() {
     addHint("of the level, counted from the start position", 200, 16, true);
 }
 
-void BarGlowLayer::buildCompletePage() {
-    m_completeToggle = addToggle("Change to colour 3 when complete", 256, m_effects.complete);
+// One button of a row where only one can be picked. The tag says which row
+// and which choice: anim 0-2, glow style 10-11, death 20-23.
+CCMenuItemToggler* BarGlowLayer::addChoice(const char* text, float x, float y, int tag) {
+    CCMenuItemToggler* button = CCMenuItemToggler::create(
+        ButtonSprite::create(text, "bigFont.fnt", "GJ_button_04.png", 0.5f),
+        ButtonSprite::create(text, "bigFont.fnt", "GJ_button_02.png", 0.5f),
+        this,
+        menu_selector(BarGlowLayer::onChoice)
+    );
+    button->setScale(0.55f);
+    button->setPosition({x, y});
+    button->setTag(tag);
 
-    addHint("Set colour 3 with the 3 button on the progress bar page.", 52, 238);
+    m_buttonMenu->addChild(button);
 
-    m_completeFlashToggle = addToggle("flash white first", 216, m_effects.completeFlash, true);
-    m_completeFadeSlider = addSlider("change time", 196, m_effects.completeFade, m_completeFadeLabel);
+    return button;
+}
 
-    CCLabelBMFont* label = CCLabelBMFont::create("animation", "bigFont.fnt");
+void BarGlowLayer::addRowLabel(const char* text, float y) {
+    CCLabelBMFont* label = CCLabelBMFont::create(text, "bigFont.fnt");
     label->setScale(0.27f);
     label->setOpacity(170);
     label->setAnchorPoint({0.f, 0.5f});
-    label->setPosition({52, 172});
+    label->setPosition({52, y});
+
+    m_mainLayer->addChild(label);
+}
+
+void BarGlowLayer::buildCompletePage() {
+    m_completeToggle = addToggle("Change to colour 3 when complete", 258, m_effects.complete);
+
+    addHint("Set colour 3 with the 3 button on the progress bar page.", 52, 242);
+
+    m_completeFlashToggle = addToggle("flash white first", 226, m_effects.completeFlash, true);
+    m_completeFadeSlider = addSlider("change time", 210, m_effects.completeFade, m_completeFadeLabel);
+
+    addRowLabel("animation", 192);
+
+    for (int i = 0; i < 3; i++)
+        m_animButtons[i] = addChoice(ANIM_NAMES[i], 160.f + 56.f * i, 192, i);
+
+    m_animSpeedSlider = addSlider("speed", 174, m_effects.animSpeed, m_animSpeedLabel);
+    m_animSizeSlider = addSlider("size", 158, m_effects.animSize, m_animSizeLabel);
+
+    // How the bar's glow falls off: evenly, or full next to the bar and then
+    // dropping away fast.
+    CCLabelBMFont* label = CCLabelBMFont::create("Glow style", "bigFont.fnt");
+    label->setScale(0.35f);
+    label->setAnchorPoint({0.f, 0.5f});
+    label->setPosition({24, 134});
 
     m_mainLayer->addChild(label);
 
-    for (int i = 0; i < 3; i++) {
-        m_animButtons[i] = CCMenuItemToggler::create(
-            ButtonSprite::create(ANIM_NAMES[i], "bigFont.fnt", "GJ_button_04.png", 0.5f),
-            ButtonSprite::create(ANIM_NAMES[i], "bigFont.fnt", "GJ_button_02.png", 0.5f),
-            this,
-            menu_selector(BarGlowLayer::onAnimButton)
-        );
-        m_animButtons[i]->setScale(0.6f);
-        m_animButtons[i]->setPosition({160.f + 56.f * i, 172});
-        m_animButtons[i]->setTag(i);
+    m_glowStyleButtons[0] = addChoice("soft", 160.f, 134, 10);
+    m_glowStyleButtons[1] = addChoice("tight", 216.f, 134, 11);
 
-        m_buttonMenu->addChild(m_animButtons[i]);
-    }
+    label = CCLabelBMFont::create("When you die", "bigFont.fnt");
+    label->setScale(0.35f);
+    label->setAnchorPoint({0.f, 0.5f});
+    label->setPosition({24, 110});
 
-    m_animSpeedSlider = addSlider("speed", 150, m_effects.animSpeed, m_animSpeedLabel);
-    m_animSizeSlider = addSlider("size", 132, m_effects.animSize, m_animSizeLabel);
+    m_mainLayer->addChild(label);
 
-    addHint("scroll: the gradient repeats along the bar and moves right without end.", 52, 110);
-    addHint("shine: a band of light sweeps across the bar. size sets how wide.", 52, 96);
-    addHint("The bar's glow follows its colours and animation.", 52, 74);
+    static const char* DEATH_NAMES[4] = { "none", "crack", "shatter", "grey" };
+
+    for (int i = 0; i < 4; i++)
+        m_deathButtons[i] = addChoice(DEATH_NAMES[i], 82.f + 62.f * i, 90, 20 + i);
+
+    m_deathFlashOnlyToggle = addToggle("only while the bar is flashing", 68, m_effects.deathFlashOnly, true);
+    m_deathFromSlider = addSlider("otherwise from", 50, m_effects.deathFrom, m_deathFromLabel, 70.f);
+
+    addHint("The bar's glow follows its colours and animations.", 200, 22, true);
 }
 
 void BarGlowLayer::showPage(int page) {
@@ -329,10 +365,15 @@ void BarGlowLayer::onPage(CCObject* sender) {
     showPage(sender == m_nextPageButton ? 1 : 0);
 }
 
-void BarGlowLayer::updateAnimButtons() {
+void BarGlowLayer::updateChoices() {
     for (int i = 0; i < 3; i++)
-        if (m_animButtons[i])
-            m_animButtons[i]->toggle(i == m_effects.completeAnim);
+        m_animButtons[i]->toggle(i == m_effects.completeAnim);
+
+    for (int i = 0; i < 2; i++)
+        m_glowStyleButtons[i]->toggle(i == m_effects.glowStyle);
+
+    for (int i = 0; i < 4; i++)
+        m_deathButtons[i]->toggle(i == m_effects.deathStyle);
 }
 
 void BarGlowLayer::updateLabels() {
@@ -348,6 +389,7 @@ void BarGlowLayer::updateLabels() {
     m_completeFadeLabel->setString(fmt::format("{:.1f}s", Utils::getBarCompleteFade(m_effects)).c_str());
     m_animSpeedLabel->setString(percentText(m_effects.animSpeed).c_str());
     m_animSizeLabel->setString(percentText(m_effects.animSize).c_str());
+    m_deathFromLabel->setString(percentText(m_effects.deathFrom).c_str());
 
     // The curve settings only appear once a curve is chosen, and only on the
     // page they belong to.
@@ -386,17 +428,25 @@ void BarGlowLayer::onToggle(CCObject* sender) {
     if (toggle == m_flashCurveToggle) m_effects.flashExponential = on;
     if (toggle == m_completeToggle) m_effects.complete = on;
     if (toggle == m_completeFlashToggle) m_effects.completeFlash = on;
+    if (toggle == m_deathFlashOnlyToggle) m_effects.deathFlashOnly = on;
 
     apply();
 }
 
-// The animation buttons work as one choice.
-void BarGlowLayer::onAnimButton(CCObject* sender) {
-    m_effects.completeAnim = std::clamp(static_cast<CCNode*>(sender)->getTag(), 0, 2);
+// Each row of buttons works as one choice.
+void BarGlowLayer::onChoice(CCObject* sender) {
+    int tag = static_cast<CCNode*>(sender)->getTag();
+
+    if (tag >= 20)
+        m_effects.deathStyle = std::clamp(tag - 20, 0, 3);
+    else if (tag >= 10)
+        m_effects.glowStyle = std::clamp(tag - 10, 0, 1);
+    else
+        m_effects.completeAnim = std::clamp(tag, 0, 2);
 
     // The clicked toggler flips itself after this, so set them all after.
     Loader::get()->queueInMainThread([self = Ref(this)] {
-        self->updateAnimButtons();
+        self->updateChoices();
     });
 
     apply();
@@ -415,6 +465,7 @@ void BarGlowLayer::onSlider(CCObject*) {
     m_effects.completeFade = std::clamp(m_completeFadeSlider->getValue(), 0.f, 1.f);
     m_effects.animSpeed = std::clamp(m_animSpeedSlider->getValue(), 0.f, 1.f);
     m_effects.animSize = std::clamp(m_animSizeSlider->getValue(), 0.f, 1.f);
+    m_effects.deathFrom = std::clamp(m_deathFromSlider->getValue(), 0.f, 1.f);
 
     apply();
 }

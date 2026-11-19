@@ -1577,7 +1577,7 @@ CCSprite* Utils::updateBarGlow(CCSprite* fill, const CCRect& fullRect, GradientC
 
 // Follows the bar while playing: how much of it is filled (0 to 1), and how
 // strong the glow is right now (0 to 1 of what was set).
-void Utils::setBarGlowState(CCSprite* glow, float fill, float strength, float brightness, float saturation) {
+void Utils::setBarGlowState(CCSprite* glow, float fill, float strength, float brightness, float saturation, int style) {
     if (!glow || !glow->isVisible()) return;
 
     CCGLProgram* program = glow->getShaderProgram();
@@ -1592,6 +1592,27 @@ void Utils::setBarGlowState(CCSprite* glow, float fill, float strength, float br
     glUniform1f(glGetUniformLocation(id, "u_strength"), std::clamp(strength, 0.f, 1.f));
     glUniform1f(glGetUniformLocation(id, "u_brightness"), brightness);
     glUniform1f(glGetUniformLocation(id, "u_saturation"), saturation);
+    glUniform1i(glGetUniformLocation(id, "u_glowStyle"), style);
+}
+
+// The death animation on one of the bar's layers.
+void Utils::setBarDeath(CCSprite* layer, int style, float amount, float fill) {
+    if (!layer || !layer->isVisible()) return;
+
+    CCGLProgram* program = layer->getShaderProgram();
+
+    if (!program) return;
+
+    GLuint id = program->getProgram();
+    GLint location = glGetUniformLocation(id, "u_deathStyle");
+
+    if (location < 0) return;
+
+    program->use();
+
+    glUniform1i(location, style);
+    glUniform1f(glGetUniformLocation(id, "u_death"), amount);
+    glUniform1f(glGetUniformLocation(id, "u_deathPoint"), fill);
 }
 
 // Sets up a progress bar's fill with both of its colours and their glows.
@@ -1698,6 +1719,25 @@ void Utils::updateBarEffects(const BarSprites& bar, const BarGlowEffects& effect
         }
     }
 
+    // Death: the bar greys out, or cracks or shatters, and its glow fades.
+    float death = state.deathTime >= 0.f && effects.deathStyle > 0
+        ? std::clamp(state.deathTime / 0.7f, 0.f, 1.f)
+        : 0.f;
+
+    if (death > 0.f) {
+        death = 1.f - (1.f - death) * (1.f - death);
+
+        if (effects.deathStyle == 3) {
+            brightness *= 1.f - 0.55f * death;
+            saturation *= 1.f - death;
+            strength *= 1.f - 0.5f * death;
+        } else
+            strength *= 1.f - death;
+    }
+
+    // Grey is done with brightness and saturation, the others in the shader.
+    int deathShape = death > 0.f && effects.deathStyle < 3 ? effects.deathStyle : 0;
+
     setBarFillLook(bar.fill, brightness, saturation);
 
     auto showLayer = [&](CCSprite* layer, float amount) {
@@ -1721,12 +1761,15 @@ void Utils::updateBarEffects(const BarSprites& bar, const BarGlowEffects& effect
 
     setBarAnim(bar.complete, anim, animPhase, animSize, white);
 
+    for (CCSprite* layer : { bar.fill, bar.overlay, bar.complete })
+        setBarDeath(layer, deathShape, death, state.progress);
+
     // Each glow in its own colour, together as strong as one.
     float rest = 1.f - complete;
 
-    setBarGlowState(bar.glow, state.progress, strength * mix * rest, brightness, saturation);
-    setBarGlowState(bar.overlayGlow, state.progress, strength * (1.f - mix) * rest, brightness, saturation);
-    setBarGlowState(bar.completeGlow, state.progress, strength * complete, brightness, saturation);
+    setBarGlowState(bar.glow, state.progress, strength * mix * rest, brightness, saturation, effects.glowStyle);
+    setBarGlowState(bar.overlayGlow, state.progress, strength * (1.f - mix) * rest, brightness, saturation, effects.glowStyle);
+    setBarGlowState(bar.completeGlow, state.progress, strength * complete, brightness, saturation, effects.glowStyle);
 
     setBarAnim(bar.completeGlow, anim, animPhase, animSize, white);
 }
@@ -1789,6 +1832,10 @@ BarGlowEffects Utils::getBarGlowEffects() {
     effects.completeAnim = std::clamp(static_cast<int>(saved["complete-anim"].asInt().unwrapOr(effects.completeAnim)), 0, 2);
     effects.animSpeed = number("anim-speed", effects.animSpeed, 0.f, 1.f);
     effects.animSize = number("anim-size", effects.animSize, 0.f, 1.f);
+    effects.glowStyle = std::clamp(static_cast<int>(saved["glow-style"].asInt().unwrapOr(effects.glowStyle)), 0, 1);
+    effects.deathStyle = std::clamp(static_cast<int>(saved["death-style"].asInt().unwrapOr(effects.deathStyle)), 0, 3);
+    effects.deathFlashOnly = saved["death-flash-only"].asBool().unwrapOr(effects.deathFlashOnly);
+    effects.deathFrom = number("death-from", effects.deathFrom, 0.f, 1.f);
 
     return effects;
 }
@@ -1816,6 +1863,10 @@ void Utils::saveBarGlowEffects(const BarGlowEffects& effects) {
     saved["complete-anim"] = effects.completeAnim;
     saved["anim-speed"] = effects.animSpeed;
     saved["anim-size"] = effects.animSize;
+    saved["glow-style"] = effects.glowStyle;
+    saved["death-style"] = effects.deathStyle;
+    saved["death-flash-only"] = effects.deathFlashOnly;
+    saved["death-from"] = effects.deathFrom;
 
     Mod::get()->setSavedValue("bar-glow-effects", saved);
 }

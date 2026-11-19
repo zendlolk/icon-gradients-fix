@@ -14,6 +14,14 @@ class $modify(ProPlayLayer, PlayLayer) {
 
         // Seconds since the bar reached the end, or below 0.
         float m_completeTime = -1.f;
+        // Seconds since the player died, or below 0.
+        float m_deathTime = -1.f;
+
+        // As of the last update, for deciding whether a death animates.
+        float m_lastProgress = 0.f;
+        bool m_lastFlashing = false;
+
+        bool m_barTicking = false;
 
         BarGlowEffects m_barEffects;
 
@@ -24,6 +32,9 @@ class $modify(ProPlayLayer, PlayLayer) {
     };
 
     void updateBarGradient(float);
+    void barTick(float);
+
+    void destroyPlayer(PlayerObject*, GameObject*);
 
     void resetLevel();
 

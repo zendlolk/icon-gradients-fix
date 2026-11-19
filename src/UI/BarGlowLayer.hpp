@@ -56,6 +56,12 @@ private:
     CCMenuItemToggler* m_completeToggle = nullptr;
     CCMenuItemToggler* m_completeFlashToggle = nullptr;
     CCMenuItemToggler* m_animButtons[3] = { nullptr, nullptr, nullptr };
+    CCMenuItemToggler* m_glowStyleButtons[2] = { nullptr, nullptr };
+    CCMenuItemToggler* m_deathButtons[4] = { nullptr, nullptr, nullptr, nullptr };
+    CCMenuItemToggler* m_deathFlashOnlyToggle = nullptr;
+
+    Slider* m_deathFromSlider = nullptr;
+    CCLabelBMFont* m_deathFromLabel = nullptr;
 
     Slider* m_completeFadeSlider = nullptr;
     Slider* m_animSpeedSlider = nullptr;
@@ -86,9 +92,12 @@ private:
     void onPage(CCObject*);
     void onToggle(CCObject*);
     void onSlider(CCObject*);
-    void onAnimButton(CCObject*);
+    void onChoice(CCObject*);
 
-    void updateAnimButtons();
+    CCMenuItemToggler* addChoice(const char*, float, float, int);
+    void addRowLabel(const char*, float);
+
+    void updateChoices();
     void updateLabels();
     void apply();
 

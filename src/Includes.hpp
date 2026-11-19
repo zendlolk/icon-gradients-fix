@@ -97,6 +97,13 @@ struct BarGlowEffects {
     int completeAnim = 0; // 0 none, 1 scroll, 2 shine
     float animSpeed = 0.4f; // 0 to 1
     float animSize = 0.3f; // 0 to 1
+
+    int glowStyle = 0; // 0 soft, 1 tight
+
+    // What the bar does when the player dies.
+    int deathStyle = 0; // 0 none, 1 crack, 2 shatter, 3 grey out
+    bool deathFlashOnly = false; // only while the bar is flashing
+    float deathFrom = 0.f; // otherwise from this much of the level, 0 to 1
 };
 
 // The sprites that make up a progress bar with this mod's effects: its fill,
@@ -123,6 +130,8 @@ struct BarState {
     float completeTime = -1.f;
     // Shows the completion colour whatever the settings, for editing it.
     bool forceComplete = false;
+    // Seconds since the player died, or below 0.
+    float deathTime = -1.f;
 };
 
 struct SimplePoint {

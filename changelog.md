@@ -8,6 +8,8 @@
 * progress bar can shift from a second colour to its first as it fills, with an optional glow build-up along the same curve
 * progress bar brightens and saturates with its glow when it flashes
 * progress bar can change to a third colour when the level is complete, with a white flash and a scrolling or shining animation that its glow follows
+* progress bar glow can be soft or tight
+* progress bar can crack, shatter or grey out when you die, from a chosen percentage or only while it is flashing
 * added a progress bar page to the gradient editor (arrow on the right of the menu), so the level progress bar can have a gradient too
 * fixed crash when the robot or spider gets rebuilt during a level (e.g. switching start positions)
 

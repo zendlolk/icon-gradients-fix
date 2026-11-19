@@ -85,14 +85,58 @@ vec4 animatedColor(vec2 uv) {
     return color;
 }
 
+// Death animations. 1: the bar cracks open in the middle of what is
+// filled. 2: it shatters into shards that shrink and drift. Both fade out.
+uniform int u_deathStyle;
+uniform float u_death; // 0 to 1, how far along
+uniform float u_deathPoint; // how much of the bar is filled
+
+float hash(float n) {
+    return fract(sin(n) * 43758.5453);
+}
+
 void main() {
-    vec4 texColor = texture2D(u_texture, v_texCoord);
+    vec2 uv = (v_texCoord - uvMin) / (uvMax - uvMin);
+    vec2 texCoord = v_texCoord;
+    float keep = 1.0;
+
+    // Moves where each piece is drawn from, so the pieces move apart.
+    if (u_death > 0.0 && u_deathStyle > 0) {
+        vec2 span = uvMax - uvMin;
+
+        if (u_deathStyle == 1) {
+            float crack = u_deathPoint * 0.5 + (hash(floor(uv.y * 5.0)) - 0.5) * 0.05;
+            float side = uv.x < crack ? -1.0 : 1.0;
+            float from = uv.x - side * u_death * 0.08;
+
+            keep = side < 0.0 ? step(from, crack) : step(crack, from);
+            uv.x = from;
+        } else if (u_deathStyle == 2) {
+            float columns = 12.0;
+            float fill = max(u_deathPoint, 0.01);
+
+            vec2 grid = vec2(uv.x / fill * columns, uv.y * 2.0);
+            vec2 cell = floor(grid);
+            float n = cell.x * 7.0 + cell.y * 13.0;
+
+            vec2 drift = (vec2(hash(n), hash(n + 1.0)) - 0.5) * 0.6 * u_death;
+            vec2 shard = (fract(grid) - 0.5 - drift) / max(1.0 - u_death, 0.001);
+
+            keep = step(abs(shard.x), 0.5) * step(abs(shard.y), 0.5);
+            uv = vec2((cell.x + 0.5 + shard.x) / columns * fill, (cell.y + 0.5 + shard.y) / 2.0);
+        }
+
+        texCoord = uvMin + uv * span;
+        keep *= 1.0 - smoothstep(0.55, 1.0, u_death);
+    }
+
+    vec4 texColor = texture2D(u_texture, texCoord);
     vec4 color;
 
     if (u_tint == 1)
         color = texColor * v_fragmentColor;
     else
-        color = texColor * animatedColor((v_texCoord - uvMin) / (uvMax - uvMin));
+        color = texColor * animatedColor(uv);
 
     // Opacity always applies, so the bar's second colour can fade over it.
     // Sprites are drawn premultiplied, so the colour fades with it; the
@@ -107,5 +151,5 @@ void main() {
     // Premultiplied, so white is as bright as the sprite is opaque.
     color.rgb = mix(color.rgb, vec3(color.a), u_white);
 
-    gl_FragColor = color;
+    gl_FragColor = color * keep;
 }

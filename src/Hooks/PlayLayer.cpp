@@ -4,6 +4,32 @@
 #include "PlayLayer.hpp"
 #include "PlayerObject.hpp"
 
+// The bar is updated on its own schedule rather than with the game, so it
+// keeps animating while the game is stopped: on death and on completion.
+void ProPlayLayer::barTick(float dt) {
+    if (Utils::isSettingEnabled(MOD_DISABLED)) return;
+
+    updateBarGradient(dt);
+}
+
+void ProPlayLayer::destroyPlayer(PlayerObject* player, GameObject* object) {
+    PlayLayer::destroyPlayer(player, object);
+
+    auto f = m_fields.self();
+
+    // The game also calls this at the start of a level without anyone dying.
+    if (!player || !player->m_isDead || f->m_deathTime >= 0.f || !f->m_barGradientApplied) return;
+
+    const BarGlowEffects& effects = f->m_barEffects;
+
+    if (!effects.deathStyle) return;
+
+    bool plays = effects.deathFlashOnly ? f->m_lastFlashing : f->m_lastProgress >= effects.deathFrom;
+
+    if (plays)
+        f->m_deathTime = 0.f;
+}
+
 void ProPlayLayer::resetLevel() {
     PlayLayer::resetLevel();
 
@@ -13,6 +39,7 @@ void ProPlayLayer::resetLevel() {
     f->m_runStart = -1.f;
     f->m_flashCycles = 0.f;
     f->m_completeTime = -1.f;
+    f->m_deathTime = -1.f;
 }
 
 void ProPlayLayer::updateBarGradient(float dt) {
@@ -24,7 +51,7 @@ void ProPlayLayer::updateBarGradient(float dt) {
     if (f->m_barGradientApplied) {
         const BarGlowEffects& effects = f->m_barEffects;
 
-        if (!f->m_barGlow && !effects.shiftColours && !effects.flash && !effects.complete) return;
+        if (!f->m_barGlow && !effects.shiftColours && !effects.flash && !effects.complete && !effects.deathStyle) return;
 
         float progress = std::clamp(m_progressFill->getTextureRect().size.width / m_progressWidth, 0.f, 1.f);
 
@@ -48,8 +75,15 @@ void ProPlayLayer::updateBarGradient(float dt) {
                 f->m_completeTime = 0.f;
         }
 
+        if (f->m_deathTime >= 0.f)
+            f->m_deathTime += dt;
+
+        f->m_lastProgress = progress;
+        f->m_lastFlashing = rate > 0.f;
+
         BarState state;
 
+        state.deathTime = f->m_deathTime;
         state.progress = progress;
         state.flashCycles = f->m_flashCycles;
         state.flashing = rate > 0.f;
@@ -92,7 +126,13 @@ void ProPlayLayer::postUpdate(float dt) {
 
     if (Utils::isSettingEnabled(MOD_DISABLED)) return;
 
-    updateBarGradient(dt);
+    auto f = m_fields.self();
+
+    if (!f->m_barTicking) {
+        f->m_barTicking = true;
+
+        schedule(schedule_selector(ProPlayLayer::barTick));
+    }
 
     if (m_player1) {
         static_cast<ProPlayerObject*>(m_player1)->updateVisibility();
